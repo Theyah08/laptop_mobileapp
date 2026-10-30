@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "888406965499",
+    "project_id": "prosforagiftshop",
+    "storage_bucket": "prosforagiftshop.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:888406965499:android:144c952ac3ec5d6046445e",
+        "android_client_info": {
+          "package_name": "com.example.prosforagiftshop"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC9ku6Ta14CSqfKQZZbWnxja7-XfAuuSwk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
