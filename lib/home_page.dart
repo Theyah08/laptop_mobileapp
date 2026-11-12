@@ -53,7 +53,9 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final GlobalKey<ScaffoldState> scaffoldKey = GlobalKey<ScaffoldState>();
   final TextEditingController searchController = TextEditingController();
-  final HttpGiftCatalogStore catalogStore = HttpGiftCatalogStore();
+  final CatalogApi catalogStore = mockApiEnabled
+      ? HttpGiftCatalogStore()
+      : FirestoreGiftCatalogStore();
   final UserLocalStore userStore = UserLocalStore();
 
   int screenIndex = 0;
@@ -81,7 +83,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _loadUserData() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final uid = _currentUserId;
     if (uid == null) {
       if (mounted) setState(() => userDataLoading = false);
       return;
@@ -193,7 +195,7 @@ class _HomePageState extends State<HomePage> {
     try {
       await catalogStore.deleteProduct(product.id);
       wishlistIds.remove(product.id);
-      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final uid = _currentUserId;
       if (uid != null) await userStore.saveWishlist(uid, wishlistIds);
       await _reloadProducts();
       if (!mounted) return;
@@ -213,7 +215,7 @@ class _HomePageState extends State<HomePage> {
   bool _isWishlisted(Datum product) => wishlistIds.contains(product.id);
 
   Future<void> _toggleWishlist(Datum product) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final uid = _currentUserId;
     if (uid == null) return;
     final wasSaved = wishlistIds.contains(product.id);
     setState(() {
@@ -342,7 +344,9 @@ class _HomePageState extends State<HomePage> {
       user: user,
       phone: profilePhone,
       onSave: (name, phone) async {
-        final current = FirebaseAuth.instance.currentUser;
+        final current = mockApiEnabled
+            ? null
+            : FirebaseAuth.instance.currentUser;
         if (current == null) return;
         await current.updateDisplayName(name);
         await userStore.savePhone(current.uid, phone);
@@ -379,15 +383,16 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _signOut() => FirebaseAuth.instance.signOut();
+  Future<void> _signOut() =>
+      mockApiEnabled ? Future<void>.value() : FirebaseAuth.instance.signOut();
 
-  Future<void> _confirmClearCatalog() async {
+  Future<void> _confirmReloadCatalog() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Clear cached catalog?'),
+        title: const Text('Reload product catalog?'),
         content: const Text(
-          'This removes local product changes and reloads the original public catalog next time. Wishlist and profile data will remain.',
+          'This reloads products from the catalog service. It will not delete products stored in Firebase.',
         ),
         actions: [
           TextButton(
@@ -396,45 +401,28 @@ class _HomePageState extends State<HomePage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Clear'),
+            child: const Text('Reload'),
           ),
         ],
       ),
     );
     if (confirmed != true) return;
     try {
-      final oldProducts = (await productsFuture).data;
-      final favoriteFingerprints = oldProducts
-          .where((product) => wishlistIds.contains(product.id))
-          .map(_productFingerprint)
-          .toSet();
-      await userStore.resetLocalCatalog();
       final refreshed = await catalogStore.loadCatalog();
-      final refreshedWishlist = refreshed.data
-          .where(
-            (product) =>
-                favoriteFingerprints.contains(_productFingerprint(product)),
-          )
-          .map((product) => product.id)
-          .toSet();
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid != null) await userStore.saveWishlist(uid, refreshedWishlist);
       if (!mounted) return;
       setState(() {
         productsFuture = Future.value(refreshed);
-        wishlistIds = refreshedWishlist;
       });
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Catalog could not be reset: $error')),
+        SnackBar(content: Text('Catalog could not be reloaded: $error')),
       );
     }
   }
 
-  String _productFingerprint(Datum product) =>
-      '${product.itemName}|${normalizeGiftCategory(product.category)}|'
-      '${product.pricePhp}|${product.subtitle}';
+  String? get _currentUserId =>
+      mockApiEnabled ? 'mock-user' : FirebaseAuth.instance.currentUser?.uid;
 
   Widget _buildSelectedScreen(User? user) {
     switch (screenIndex) {
@@ -444,7 +432,7 @@ class _HomePageState extends State<HomePage> {
         return SettingsScreen(
           user: user,
           onOpenProfile: () => _selectScreen(4),
-          onClearCatalog: _confirmClearCatalog,
+          onReloadCatalog: _confirmReloadCatalog,
           onSignOut: _signOut,
         );
       case 3:
@@ -619,7 +607,7 @@ class _HomePageState extends State<HomePage> {
         leading: const Icon(Icons.logout, color: Colors.red),
         title: const Text('Sign Out', style: TextStyle(color: Colors.red)),
         onTap: () async {
-          await FirebaseAuth.instance.signOut();
+          await _signOut();
           if (mounted) Navigator.pushReplacementNamed(context, '/login');
         },
       ),
@@ -683,7 +671,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
+    final user = mockApiEnabled ? null : FirebaseAuth.instance.currentUser;
     return showNavigationDrawer
         ? _buildDrawerScaffold(user)
         : _buildBottomBarScaffold(user);
@@ -1046,6 +1034,12 @@ class HomeDashboard extends StatelessWidget {
         );
       }
       if (snapshot.hasError) {
+        final error = snapshot.error;
+        final message =
+            error is FirebaseException && error.code == 'permission-denied'
+            ? 'Firestore denied access. Confirm you are signed in, then publish '
+                  'the rules in firestore.rules to the prosforagiftshop project.'
+            : 'Could not load products.\n$error';
         return Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -1054,7 +1048,7 @@ class HomeDashboard extends StatelessWidget {
                 const Icon(Icons.error_outline, color: Colors.red, size: 36),
                 const SizedBox(height: 8),
                 Text(
-                  'Could not load products.\n${snapshot.error}',
+                  message,
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: Colors.red),
                 ),

@@ -1,0 +1,47 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /products/{productId} {
+      function validProduct() {
+        return request.resource.data.keys().hasAll([
+            'id',
+            'item_name',
+            'category',
+            'price_php',
+            'subtitle'
+          ])
+          && request.resource.data.keys().hasOnly([
+            'id',
+            'item_name',
+            'category',
+            'price_php',
+            'subtitle',
+            'image_asset',
+            'image_path'
+          ])
+          && request.resource.data.id is string
+          && request.resource.data.item_name is string
+          && request.resource.data.category is string
+          && request.resource.data.price_php is int
+          && request.resource.data.subtitle is string
+          && (!('image_asset' in request.resource.data)
+            || request.resource.data.image_asset is string)
+          && (!('image_path' in request.resource.data)
+            || request.resource.data.image_path is string);
+      }
+
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null && validProduct();
+      allow delete: if request.auth != null;
+    }
+
+    match /catalogMetadata/{metadataId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && metadataId == 'products'
+        && request.resource.data.keys().hasOnly(['seeded'])
+        && request.resource.data.seeded is bool;
+    }
+  }
+}

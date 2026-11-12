@@ -189,13 +189,13 @@ class SettingsScreen extends StatelessWidget {
     super.key,
     required this.user,
     required this.onOpenProfile,
-    required this.onClearCatalog,
+    required this.onReloadCatalog,
     required this.onSignOut,
   });
 
   final User? user;
   final VoidCallback onOpenProfile;
-  final VoidCallback onClearCatalog;
+  final VoidCallback onReloadCatalog;
   final Future<void> Function() onSignOut;
 
   void _showInfo(BuildContext context, String title, String message) {
@@ -245,9 +245,9 @@ class SettingsScreen extends StatelessWidget {
       ),
       ListTile(
         leading: const Icon(Icons.cleaning_services_outlined),
-        title: const Text('Clear cached catalog'),
-        subtitle: const Text('The catalog will be downloaded again next time'),
-        onTap: onClearCatalog,
+        title: const Text('Reload product catalog'),
+        subtitle: const Text('Refresh products from the catalog service'),
+        onTap: onReloadCatalog,
       ),
       ListTile(
         leading: const Icon(Icons.logout, color: Colors.red),

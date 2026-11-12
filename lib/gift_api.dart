@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
@@ -16,6 +17,7 @@ const String giftCatalogUrl =
     'https://gist.githubusercontent.com/Theyah08/172581b884329c75b2a9e9875d2e78b6/raw/75dc8b1b70b70f79efc427db4bc73e0a09334550/gift.json';
 const String productsApiUrl =
     'https://6ae43d4d933120ae20f9a3e7.mockapi.io/api/product/product';
+const bool mockApiEnabled = bool.fromEnvironment('MOCK_API');
 const String _catalogStorageKey = 'prosfora_gift_catalog_v1';
 const String _catalogMigrationCompleteKey =
     'prosfora_rest_catalog_migration_complete_v1';
@@ -70,7 +72,7 @@ const List<String> giftProductImageAssets = [
   'assets/Product/Stationery/4stationery_Weekly_planner.jpg',
   'assets/Product/Teddy_bear/1teddy_bear_Brown.jpg',
   'assets/Product/Teddy_bear/2teddy_bear_soft_plush.webp',
-  'assets/Product/Teddy_bear/3teddy_bear_keychain.avif',
+  'assets/Product/Teddy_bear/3teddy_bear_keychain.jpg',
   'assets/Product/Teddy_bear/4teddy_bear_pastel.jpg',
 ];
 
@@ -118,6 +120,13 @@ List<Datum> _parseProducts(dynamic value) {
     }
     return Datum.fromJson(entry);
   }).toList();
+}
+
+abstract interface class CatalogApi {
+  Future<Item> loadCatalog();
+  Future<void> createProduct(Datum product);
+  Future<void> updateProduct(Datum product);
+  Future<void> deleteProduct(String id);
 }
 
 class GiftCatalogStore {
@@ -210,9 +219,10 @@ class GiftCatalogStore {
   }
 }
 
-class HttpGiftCatalogStore {
+class HttpGiftCatalogStore implements CatalogApi {
   HttpGiftCatalogStore({http.Client? client})
-    : _client = client ?? http.Client();
+    : _client =
+          client ?? (mockApiEnabled ? MockGiftApiClient() : http.Client());
 
   final http.Client _client;
 
@@ -222,6 +232,7 @@ class HttpGiftCatalogStore {
     pathSegments: [..._collectionUri.pathSegments, id],
   );
 
+  @override
   Future<Item> loadCatalog() async {
     final response = await _client.get(_collectionUri);
     if (response.statusCode != 200) {
@@ -281,6 +292,7 @@ class HttpGiftCatalogStore {
     return itemFromJson(response.body).data;
   }
 
+  @override
   Future<void> createProduct(Datum product) async {
     final jsonData = product.toJson()..remove('id');
     final response = await _client.post(
@@ -295,6 +307,7 @@ class HttpGiftCatalogStore {
     }
   }
 
+  @override
   Future<void> updateProduct(Datum product) async {
     final response = await _client.put(
       _productUri(product.id),
@@ -308,6 +321,7 @@ class HttpGiftCatalogStore {
     }
   }
 
+  @override
   Future<void> deleteProduct(String id) async {
     final response = await _client.delete(_productUri(id));
     if (response.statusCode != 200 && response.statusCode != 204) {
@@ -316,6 +330,240 @@ class HttpGiftCatalogStore {
       );
     }
   }
+}
+
+class FirestoreGiftCatalogStore implements CatalogApi {
+  FirestoreGiftCatalogStore({FirebaseFirestore? firestore})
+    : _firestore = firestore ?? FirebaseFirestore.instance,
+      _products = (firestore ?? FirebaseFirestore.instance).collection(
+        'products',
+      ),
+      _catalogMetadata = (firestore ?? FirebaseFirestore.instance)
+          .collection('catalogMetadata')
+          .doc('products');
+
+  final FirebaseFirestore _firestore;
+  final CollectionReference<Map<String, dynamic>> _products;
+  final DocumentReference<Map<String, dynamic>> _catalogMetadata;
+
+  DocumentReference<Map<String, dynamic>> _productDocument(String id) =>
+      _products.doc(Uri.encodeComponent(id));
+
+  @override
+  Future<Item> loadCatalog() async {
+    final snapshot = await _products.get();
+    if (snapshot.docs.isNotEmpty) {
+      return Item(
+        data: snapshot.docs.map((document) {
+          final data = document.data();
+          return Datum.fromJson({...data, 'id': data['id'] ?? document.id});
+        }).toList(),
+      );
+    }
+
+    final metadata = await _catalogMetadata.get();
+    if (metadata.data()?['seeded'] == true) {
+      return Item(data: []);
+    }
+
+    final preferences = await SharedPreferences.getInstance();
+    final productsToMigrate = await _loadProductsToMigrate(preferences);
+    await _writeProducts(productsToMigrate);
+    await _catalogMetadata.set({'seeded': true});
+    return Item(data: productsToMigrate);
+  }
+
+  Future<List<Datum>> _loadProductsToMigrate(
+    SharedPreferences preferences,
+  ) async {
+    final savedCatalog = preferences.getString(_catalogStorageKey);
+    if (savedCatalog != null) {
+      try {
+        final savedProducts = itemFromJson(savedCatalog).data;
+        if (savedProducts.isNotEmpty) return savedProducts;
+      } on FormatException {
+        await preferences.remove(_catalogStorageKey);
+      } on TypeError {
+        await preferences.remove(_catalogStorageKey);
+      }
+    }
+
+    final legacyResponse = await http.get(Uri.parse(productsApiUrl));
+    if (legacyResponse.statusCode == 200) {
+      final legacyProducts = itemFromJson(legacyResponse.body).data;
+      if (legacyProducts.isNotEmpty) return legacyProducts;
+    } else if (legacyResponse.statusCode != 404) {
+      throw Exception(
+        'Failed to load products for Firestore migration '
+        '(${legacyResponse.statusCode}): ${legacyResponse.body}',
+      );
+    }
+
+    final starterResponse = await http.get(Uri.parse(giftCatalogUrl));
+    if (starterResponse.statusCode != 200) {
+      throw Exception(
+        'Failed to load starter products for Firestore migration '
+        '(${starterResponse.statusCode}): ${starterResponse.body}',
+      );
+    }
+    return itemFromJson(starterResponse.body).data;
+  }
+
+  Future<void> _writeProducts(List<Datum> products) async {
+    for (var start = 0; start < products.length; start += 500) {
+      final batch = _firestore.batch();
+      final end = (start + 500).clamp(0, products.length).toInt();
+      for (final product in products.sublist(start, end)) {
+        batch.set(_productDocument(product.id), product.toJson());
+      }
+      await batch.commit();
+    }
+  }
+
+  @override
+  Future<void> createProduct(Datum product) =>
+      _productDocument(product.id).set(product.toJson());
+
+  @override
+  Future<void> updateProduct(Datum product) =>
+      _productDocument(product.id).update(product.toJson());
+
+  @override
+  Future<void> deleteProduct(String id) async {
+    final document = _productDocument(id);
+    if (!(await document.get()).exists) {
+      throw StateError('The product no longer exists.');
+    }
+    await document.delete();
+  }
+}
+
+class MockGiftApiClient extends http.BaseClient {
+  MockGiftApiClient() : _products = _mockProducts();
+
+  final List<Map<String, dynamic>> _products;
+  int _nextId = 1;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final collectionPath = Uri.parse(productsApiUrl).pathSegments;
+    final requestPath = request.url.pathSegments;
+    final isCollection =
+        requestPath.length == collectionPath.length &&
+        _samePath(requestPath, collectionPath);
+    final isProduct =
+        requestPath.length == collectionPath.length + 1 &&
+        _samePath(requestPath.take(collectionPath.length), collectionPath);
+
+    if (!isCollection && !isProduct) {
+      return _response('Not found', 404);
+    }
+
+    if (isCollection && request.method == 'GET') {
+      return _response(jsonEncode(_products), 200);
+    }
+    if (isProduct) {
+      final index = _products.indexWhere(
+        (product) => product['id'] == requestPath.last,
+      );
+      if (request.method == 'GET') {
+        return index == -1
+            ? _response('Product not found', 404)
+            : _response(jsonEncode(_products[index]), 200);
+      }
+      if (request.method == 'PUT') {
+        if (index == -1) return _response('Product not found', 404);
+        final updated = _decodeProduct(
+          await request.finalize().bytesToString(),
+        );
+        updated['id'] = requestPath.last;
+        _products[index] = updated;
+        return _response(jsonEncode(updated), 200);
+      }
+      if (request.method == 'DELETE') {
+        if (index == -1) return _response('Product not found', 404);
+        _products.removeAt(index);
+        return _response('', 204);
+      }
+    }
+    if (isCollection && request.method == 'POST') {
+      final product = _decodeProduct(await request.finalize().bytesToString());
+      product['id'] = 'mock-${_nextId++}';
+      _products.add(product);
+      return _response(jsonEncode(product), 201);
+    }
+
+    return _response('Method not allowed', 405);
+  }
+
+  bool _samePath(Iterable<String> left, Iterable<String> right) =>
+      left.join('/') == right.join('/');
+
+  Map<String, dynamic> _decodeProduct(String body) {
+    final decoded = jsonDecode(body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Expected a product JSON object.');
+    }
+    return decoded;
+  }
+
+  http.StreamedResponse _response(String body, int statusCode) =>
+      http.StreamedResponse(
+        Stream.value(utf8.encode(body)),
+        statusCode,
+        headers: {'content-type': 'application/json'},
+      );
+
+  static List<Map<String, dynamic>> _mockProducts() => [
+    Datum(
+      id: 'mock-flower-1',
+      imageAsset: giftProductImageAssets[0],
+      itemName: 'Classic Rose Box',
+      category: 'Flowers',
+      pricePhp: 1250,
+      subtitle: 'A timeless arrangement for someone special',
+    ).toJson(),
+    Datum(
+      id: 'mock-flower-2',
+      imageAsset: giftProductImageAssets[2],
+      itemName: 'Fresh Tulip Wrap',
+      category: 'Flowers',
+      pricePhp: 980,
+      subtitle: 'Bright tulips wrapped and ready to gift',
+    ).toJson(),
+    Datum(
+      id: 'mock-mug-1',
+      imageAsset: giftProductImageAssets[4],
+      itemName: 'Personalized Mug',
+      category: 'Mugs and Drinkware',
+      pricePhp: 420,
+      subtitle: 'A custom keepsake for everyday coffee',
+    ).toJson(),
+    Datum(
+      id: 'mock-stationery-1',
+      imageAsset: giftProductImageAssets[12],
+      itemName: 'A5 Journal',
+      category: 'Stationery',
+      pricePhp: 350,
+      subtitle: 'A lovely place for notes and plans',
+    ).toJson(),
+    Datum(
+      id: 'mock-plush-1',
+      imageAsset: giftProductImageAssets[16],
+      itemName: 'Brown Teddy Bear',
+      category: 'Plushies',
+      pricePhp: 790,
+      subtitle: 'A soft companion for every occasion',
+    ).toJson(),
+    Datum(
+      id: 'mock-fragrance-1',
+      imageAsset: giftProductImageAssets[8],
+      itemName: 'Vanilla Perfume',
+      category: 'Fragrance',
+      pricePhp: 1150,
+      subtitle: 'A warm, sweet fragrance in a gift-ready bottle',
+    ).toJson(),
+  ];
 }
 
 class Datum {
@@ -472,6 +720,8 @@ String? imageAssetForProduct(Datum product) {
 
   final name = product.itemName.toLowerCase();
   final category = product.category.toLowerCase();
+  final isPlushCategory =
+      category.contains('teddy') || category.contains('plush');
   if (name.contains('rose box')) return giftProductImageAssets[0];
   if (name.contains('sunflower') || name.contains('dried bouquet')) {
     return giftProductImageAssets[1];
@@ -501,22 +751,24 @@ String? imageAssetForProduct(Datum product) {
   if (name.contains('gel pen')) return giftProductImageAssets[13];
   if (name.contains('washi')) return giftProductImageAssets[14];
   if (name.contains('planner')) return giftProductImageAssets[15];
-  if (name.contains('brown') && category.contains('teddy')) {
+  if (name.contains('brown') && isPlushCategory) {
     return giftProductImageAssets[16];
   }
   if (name.contains('giant') || name.contains('soft plush')) {
     return giftProductImageAssets[17];
   }
   if (name.contains('keychain')) return giftProductImageAssets[18];
-  if (name.contains('pastel') && category.contains('teddy')) {
+  if (name.contains('pastel') && isPlushCategory) {
     return giftProductImageAssets[19];
   }
 
   if (category.contains('flower')) return giftProductImageAssets[0];
   if (category.contains('mug')) return giftProductImageAssets[4];
-  if (category.contains('perfume')) return giftProductImageAssets[8];
+  if (category.contains('perfume') || category.contains('fragrance')) {
+    return giftProductImageAssets[8];
+  }
   if (category.contains('station')) return giftProductImageAssets[12];
-  if (category.contains('teddy')) return giftProductImageAssets[16];
+  if (isPlushCategory) return giftProductImageAssets[16];
   return null;
 }
 

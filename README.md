@@ -38,15 +38,36 @@ lib/
 
 Run the app with `flutter pub get` followed by `flutter run`.
 
-## Product REST API
+## Running with the mock API
 
-The product catalog uses the REST endpoint configured as `productsApiUrl` in
-`lib/gift_api.dart`. It expects a JSON array from GET, accepts JSON product
-objects for POST and PUT, and uses each product's `id` as the item URL suffix
-for PUT and DELETE.
+To run the app without Firebase or a network API, start it with:
 
-The product API must permit requests from the app's platforms. If the API
-collection is empty on first launch, the app imports the saved local catalog
-when available, or otherwise imports the starter products from `giftCatalogUrl`.
-The migration runs only once per installation, so deleting all remote products
-does not cause the starter catalog to be restored.
+```shell
+flutter run --dart-define=MOCK_API=true
+```
+
+In this mode, the app opens directly to the shop and uses a seeded, in-memory
+product API that supports listing, creating, editing, and deleting products.
+Mock product changes are reset when the app restarts. Without this define, the
+app uses Firebase Authentication and Cloud Firestore.
+
+## Firebase product catalog
+
+Products are stored in the `products` Cloud Firestore collection in the
+configured `prosforagiftshop` Firebase project. On the first load, if that
+collection is empty, the app imports the saved local catalog or the existing
+REST catalog; if neither contains products, it imports the starter catalog.
+The import runs once across app installations.
+
+The rules require authentication to read or change products and validate the
+product fields. Publish them in Firebase Console under **Firestore Database >
+Rules**, or with `firebase deploy --only firestore:rules` after installing and
+signing in to the Firebase CLI for the configured project. If the app shows a
+Firestore `permission-denied` error, these rules have not been published to the
+active project or the user is not signed in. The rules allow any signed-in
+user to edit the catalog; restrict write rules to an admin claim before using
+this with untrusted users.
+
+Bundled product images are referenced by their asset paths. Images picked from
+a device are still saved as local paths (or browser data URLs); Firebase Storage
+is needed to share uploaded photos across devices.

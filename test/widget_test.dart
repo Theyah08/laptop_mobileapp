@@ -8,6 +8,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -15,8 +16,22 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:prosforagiftshop/gift_api.dart';
 import 'package:prosforagiftshop/login_page.dart';
+import 'package:prosforagiftshop/main_page.dart';
 
 void main() {
+  testWidgets(
+    'mock mode opens the shop with seeded products',
+    skip: !mockApiEnabled,
+    (WidgetTester tester) async {
+      SharedPreferences.setMockInitialValues({});
+      await tester.pumpWidget(const MaterialApp(home: MainPage()));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Prosfora Gift Shop'), findsOneWidget);
+      expect(find.text('Classic Rose Box'), findsOneWidget);
+    },
+  );
+
   testWidgets('password can be shown and hidden', (WidgetTester tester) async {
     await tester.pumpWidget(const MaterialApp(home: LoginPage()));
 
@@ -49,18 +64,44 @@ void main() {
       pricePhp: 1500,
       subtitle: 'Pure elegance delivered',
     );
-    final teddy = Datum(
+    final keychain = Datum(
       itemName: 'Mini Keychain Teddy',
       category: 'teddy bear',
       pricePhp: 150,
       subtitle: 'Cute on the go',
+    );
+    final brownPlush = Datum(
+      itemName: 'Classic Brown Cuddle Bear',
+      category: 'Plushies',
+      pricePhp: 599,
+      subtitle: 'Soft hugging buddy',
+    );
+    final pastelPlush = Datum(
+      itemName: 'Pastel Pink Bow Bear',
+      category: 'Plushies',
+      pricePhp: 680,
+      subtitle: 'Sweet companion gift',
     );
 
     expect(
       imageAssetForProduct(flower),
       contains('3flower_Tulip_wrapped.webp'),
     );
-    expect(imageAssetForProduct(teddy), contains('3teddy_bear_keychain.avif'));
+    expect(
+      imageAssetForProduct(keychain),
+      contains('3teddy_bear_keychain.jpg'),
+    );
+    expect(imageAssetForProduct(brownPlush), contains('1teddy_bear_Brown.jpg'));
+    expect(
+      imageAssetForProduct(pastelPlush),
+      contains('4teddy_bear_pastel.jpg'),
+    );
+  });
+
+  test('product image assets are bundled', () async {
+    for (final asset in giftProductImageAssets) {
+      await rootBundle.load(asset);
+    }
   });
 
   test('products without remote IDs receive stable IDs from catalog JSON', () {
@@ -138,6 +179,49 @@ void main() {
       '${Uri.parse(productsApiUrl).path}/remote-123',
     );
     expect(requests[3].url.path, requests[2].url.path);
+  });
+
+  test('mock API provides seeded products and supports product CRUD', () async {
+    SharedPreferences.setMockInitialValues({});
+    final catalog = HttpGiftCatalogStore(client: MockGiftApiClient());
+
+    final initial = await catalog.loadCatalog();
+    expect(initial.data, isNotEmpty);
+    expect(initial.data.map((product) => product.category).toSet(), {
+      'Flowers',
+      'Mugs and Drinkware',
+      'Stationery',
+      'Plushies',
+      'Fragrance',
+    });
+
+    final product = Datum(
+      itemName: 'Mock Gift',
+      category: 'Flowers',
+      pricePhp: 200,
+      subtitle: 'Created locally',
+    );
+    await catalog.createProduct(product);
+    final afterCreate = await catalog.loadCatalog();
+    final created = afterCreate.data.singleWhere(
+      (item) => item.itemName == product.itemName,
+    );
+    expect(created.id, startsWith('mock-'));
+
+    final updated = created.copyWith(pricePhp: 250);
+    await catalog.updateProduct(updated);
+    expect(
+      (await catalog.loadCatalog()).data
+          .singleWhere((item) => item.id == created.id)
+          .pricePhp,
+      250,
+    );
+
+    await catalog.deleteProduct(created.id);
+    expect(
+      (await catalog.loadCatalog()).data.any((item) => item.id == created.id),
+      isFalse,
+    );
   });
 
   test(
