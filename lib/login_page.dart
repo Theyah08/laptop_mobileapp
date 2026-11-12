@@ -91,7 +91,7 @@ class _LoginPageState extends State<LoginPage> {
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: softPink.withOpacity(0.35),
+                        color: softPink.withValues(alpha: 0.35),
                         blurRadius: 15,
                         offset: const Offset(0, 6),
                       ),
@@ -227,7 +227,7 @@ class _LoginPageState extends State<LoginPage> {
                         backgroundColor: softPink,
                         foregroundColor: Colors.white,
                         elevation: 3,
-                        shadowColor: softPink.withOpacity(0.4),
+                        shadowColor: softPink.withValues(alpha: 0.4),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(15),
                         ),

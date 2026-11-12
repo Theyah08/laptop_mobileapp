@@ -1,17 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:prosforagiftshop/firebase_options.dart';
-import 'package:prosforagiftshop/gift_api.dart';
 import 'package:prosforagiftshop/main_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  if (!mockApiEnabled) {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-  }
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   runApp(const MyApp());
 }

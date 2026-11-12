@@ -53,9 +53,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final GlobalKey<ScaffoldState> scaffoldKey = GlobalKey<ScaffoldState>();
   final TextEditingController searchController = TextEditingController();
-  final CatalogApi catalogStore = mockApiEnabled
-      ? HttpGiftCatalogStore()
-      : FirestoreGiftCatalogStore();
+  final CatalogApi catalogStore = FirestoreGiftCatalogStore();
   final UserLocalStore userStore = UserLocalStore();
 
   int screenIndex = 0;
@@ -344,9 +342,7 @@ class _HomePageState extends State<HomePage> {
       user: user,
       phone: profilePhone,
       onSave: (name, phone) async {
-        final current = mockApiEnabled
-            ? null
-            : FirebaseAuth.instance.currentUser;
+        final current = FirebaseAuth.instance.currentUser;
         if (current == null) return;
         await current.updateDisplayName(name);
         await userStore.savePhone(current.uid, phone);
@@ -383,8 +379,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _signOut() =>
-      mockApiEnabled ? Future<void>.value() : FirebaseAuth.instance.signOut();
+  Future<void> _signOut() => FirebaseAuth.instance.signOut();
 
   Future<void> _confirmReloadCatalog() async {
     final confirmed = await showDialog<bool>(
@@ -421,8 +416,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  String? get _currentUserId =>
-      mockApiEnabled ? 'mock-user' : FirebaseAuth.instance.currentUser?.uid;
+  String? get _currentUserId => FirebaseAuth.instance.currentUser?.uid;
 
   Widget _buildSelectedScreen(User? user) {
     switch (screenIndex) {
@@ -671,7 +665,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final user = mockApiEnabled ? null : FirebaseAuth.instance.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
     return showNavigationDrawer
         ? _buildDrawerScaffold(user)
         : _buildBottomBarScaffold(user);

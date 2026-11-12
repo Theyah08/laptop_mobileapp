@@ -5,33 +5,15 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:prosforagiftshop/gift_api.dart';
 import 'package:prosforagiftshop/login_page.dart';
-import 'package:prosforagiftshop/main_page.dart';
 
 void main() {
-  testWidgets(
-    'mock mode opens the shop with seeded products',
-    skip: !mockApiEnabled,
-    (WidgetTester tester) async {
-      SharedPreferences.setMockInitialValues({});
-      await tester.pumpWidget(const MaterialApp(home: MainPage()));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Prosfora Gift Shop'), findsOneWidget);
-      expect(find.text('Classic Rose Box'), findsOneWidget);
-    },
-  );
-
   testWidgets('password can be shown and hidden', (WidgetTester tester) async {
     await tester.pumpWidget(const MaterialApp(home: LoginPage()));
 
@@ -133,126 +115,4 @@ void main() {
 
     expect(reloaded.data.single.imagePath, product.imagePath);
   });
-
-  test('REST catalog uses GET POST PUT and DELETE endpoints', () async {
-    final requests = <http.Request>[];
-    final client = MockClient((request) async {
-      requests.add(request);
-      return switch (request.method) {
-        'GET' => http.Response(
-          '[{"id":"remote-123","item_name":"Test Gift","category":"Flowers","price_php":100,"subtitle":"Test"}]',
-          200,
-        ),
-        'POST' => http.Response('{"id":"remote-123"}', 201),
-        'PUT' => http.Response('{}', 200),
-        'DELETE' => http.Response('', 204),
-        _ => http.Response('Unsupported method', 405),
-      };
-    });
-    final catalog = HttpGiftCatalogStore(client: client);
-    final product = Datum(
-      id: 'remote-123',
-      itemName: 'Test Gift',
-      category: 'Flowers',
-      pricePhp: 100,
-      subtitle: 'Test',
-    );
-
-    final loaded = await catalog.loadCatalog();
-    await catalog.createProduct(product);
-    await catalog.updateProduct(product);
-    await catalog.deleteProduct(product.id);
-
-    expect(loaded.data.single.id, 'remote-123');
-    expect(requests.map((request) => request.method), [
-      'GET',
-      'POST',
-      'PUT',
-      'DELETE',
-    ]);
-    expect(requests[0].url.toString(), productsApiUrl);
-    expect(requests[1].url.toString(), productsApiUrl);
-    expect(requests[1].headers['content-type'], 'application/json');
-    expect(jsonDecode(requests[1].body), isNot(contains('id')));
-    expect(
-      requests[2].url.path,
-      '${Uri.parse(productsApiUrl).path}/remote-123',
-    );
-    expect(requests[3].url.path, requests[2].url.path);
-  });
-
-  test('mock API provides seeded products and supports product CRUD', () async {
-    SharedPreferences.setMockInitialValues({});
-    final catalog = HttpGiftCatalogStore(client: MockGiftApiClient());
-
-    final initial = await catalog.loadCatalog();
-    expect(initial.data, isNotEmpty);
-    expect(initial.data.map((product) => product.category).toSet(), {
-      'Flowers',
-      'Mugs and Drinkware',
-      'Stationery',
-      'Plushies',
-      'Fragrance',
-    });
-
-    final product = Datum(
-      itemName: 'Mock Gift',
-      category: 'Flowers',
-      pricePhp: 200,
-      subtitle: 'Created locally',
-    );
-    await catalog.createProduct(product);
-    final afterCreate = await catalog.loadCatalog();
-    final created = afterCreate.data.singleWhere(
-      (item) => item.itemName == product.itemName,
-    );
-    expect(created.id, startsWith('mock-'));
-
-    final updated = created.copyWith(pricePhp: 250);
-    await catalog.updateProduct(updated);
-    expect(
-      (await catalog.loadCatalog()).data
-          .singleWhere((item) => item.id == created.id)
-          .pricePhp,
-      250,
-    );
-
-    await catalog.deleteProduct(created.id);
-    expect(
-      (await catalog.loadCatalog()).data.any((item) => item.id == created.id),
-      isFalse,
-    );
-  });
-
-  test(
-    'empty REST catalog migrates products saved by the old local store',
-    () async {
-      SharedPreferences.setMockInitialValues({
-        'prosfora_gift_catalog_v1':
-            '{"data":[{"id":"local-1","item_name":"Saved Gift","category":"Flowers","price_php":100,"subtitle":"Saved before API migration"}]}',
-      });
-      final remoteProducts = <Map<String, dynamic>>[];
-      final requests = <http.Request>[];
-      final client = MockClient((request) async {
-        requests.add(request);
-        if (request.method == 'GET') {
-          return http.Response(jsonEncode(remoteProducts), 200);
-        }
-        if (request.method == 'POST') {
-          final product = jsonDecode(request.body) as Map<String, dynamic>;
-          final createdProduct = {...product, 'id': 'remote-1'};
-          remoteProducts.add(createdProduct);
-          return http.Response(jsonEncode(createdProduct), 201);
-        }
-        return http.Response('Unsupported method', 405);
-      });
-
-      final catalog = await HttpGiftCatalogStore(client: client).loadCatalog();
-
-      expect(catalog.data.single.id, 'remote-1');
-      expect(catalog.data.single.itemName, 'Saved Gift');
-      expect(requests.map((request) => request.method), ['GET', 'POST', 'GET']);
-      expect(jsonDecode(requests[1].body), isNot(contains('id')));
-    },
-  );
 }

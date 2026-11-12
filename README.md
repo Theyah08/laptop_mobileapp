@@ -38,26 +38,14 @@ lib/
 
 Run the app with `flutter pub get` followed by `flutter run`.
 
-## Running with the mock API
-
-To run the app without Firebase or a network API, start it with:
-
-```shell
-flutter run --dart-define=MOCK_API=true
-```
-
-In this mode, the app opens directly to the shop and uses a seeded, in-memory
-product API that supports listing, creating, editing, and deleting products.
-Mock product changes are reset when the app restarts. Without this define, the
-app uses Firebase Authentication and Cloud Firestore.
-
 ## Firebase product catalog
 
 Products are stored in the `products` Cloud Firestore collection in the
 configured `prosforagiftshop` Firebase project. On the first load, if that
-collection is empty, the app imports the saved local catalog or the existing
-REST catalog; if neither contains products, it imports the starter catalog.
-The import runs once across app installations.
+collection is empty, the app imports the saved local catalog; if there are no
+saved products, it imports the starter catalog. The import runs once across app
+installations. Product reads and changes use Firestore; there is no MockAPI
+catalog connection.
 
 The rules require authentication to read or change products and validate the
 product fields. Publish them in Firebase Console under **Firestore Database >
