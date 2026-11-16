@@ -435,6 +435,16 @@ class ShopOrder {
   int get totalPhp =>
       (subtotalPhp - voucherDiscountPhp).clamp(0, subtotalPhp).toInt();
 
+  ShopOrder copyWith({String? status}) => ShopOrder(
+    id: id,
+    orderedAt: orderedAt,
+    shippingAddress: shippingAddress,
+    lines: lines,
+    pointsEarned: pointsEarned,
+    voucherDiscountPhp: voucherDiscountPhp,
+    status: status ?? this.status,
+  );
+
   factory ShopOrder.fromJson(Map<String, dynamic> json) {
     final lines = json['lines'];
     if (lines is! List) {
@@ -465,6 +475,13 @@ class ShopOrder {
     'status': status,
   };
 }
+
+const List<String> demoOrderStatuses = [
+  'Pending',
+  'Processing',
+  'Completed',
+  'Cancelled',
+];
 
 class RewardWallet {
   const RewardWallet({this.points = 0, this.creditPhp = 0});

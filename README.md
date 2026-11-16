@@ -74,4 +74,6 @@ account. Checkout is a local demonstration only: it does not collect payment or
 send an order to a fulfillment service. Customers earn 1 point per PHP 100
 spent. At checkout, rewards are optional; every 200 points apply PHP 10 off,
 up to the order subtotal. The Rewards screen can also convert 200 points into
-PHP 10 of local reward credit.
+PHP 10 of local reward credit. Demo order statuses can be changed in Settings
+and are saved with the local order history. Processing orders can be cancelled
+after confirmation, and completed orders can be reordered into the cart.

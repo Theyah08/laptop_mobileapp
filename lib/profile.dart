@@ -108,12 +108,14 @@ class ProfileScreen extends StatelessWidget {
     required this.address,
     required this.photoPath,
     required this.orderCount,
+    required this.orders,
     required this.cartCount,
     required this.wishlistCount,
     required this.rewardPoints,
     required this.onEditProfile,
     required this.onChangePhoto,
     required this.onOpenOrders,
+    required this.onOpenOrdersByStatus,
     required this.onOpenCart,
     required this.onOpenWishlist,
     required this.onOpenRewards,
@@ -125,12 +127,14 @@ class ProfileScreen extends StatelessWidget {
   final String address;
   final String? photoPath;
   final int orderCount;
+  final List<ShopOrder> orders;
   final int cartCount;
   final int wishlistCount;
   final int rewardPoints;
   final VoidCallback onEditProfile;
   final VoidCallback onChangePhoto;
   final VoidCallback onOpenOrders;
+  final ValueChanged<String> onOpenOrdersByStatus;
   final VoidCallback onOpenCart;
   final VoidCallback onOpenWishlist;
   final VoidCallback onOpenRewards;
@@ -260,6 +264,65 @@ class ProfileScreen extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Card(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'My Orders',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: onOpenOrders,
+                      child: const Text('View all'),
+                    ),
+                  ],
+                ),
+                SizedBox(
+                  height: 92,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      _ProfileOrderStatus(
+                        title: 'Pending',
+                        count: _countOrders('Pending'),
+                        icon: Icons.payment_outlined,
+                        onTap: () => onOpenOrdersByStatus('Pending'),
+                      ),
+                      _ProfileOrderStatus(
+                        title: 'Processing',
+                        count: _countOrders('Processing'),
+                        icon: Icons.local_shipping_outlined,
+                        onTap: () => onOpenOrdersByStatus('Processing'),
+                      ),
+                      _ProfileOrderStatus(
+                        title: 'Completed',
+                        count: _countOrders('Completed'),
+                        icon: Icons.check_circle_outline,
+                        onTap: () => onOpenOrdersByStatus('Completed'),
+                      ),
+                      _ProfileOrderStatus(
+                        title: 'Cancelled',
+                        count: _countOrders('Cancelled'),
+                        icon: Icons.cancel_outlined,
+                        onTap: () => onOpenOrdersByStatus('Cancelled'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Card(
           child: Column(
             children: [
               const ListTile(
@@ -323,6 +386,56 @@ class ProfileScreen extends StatelessWidget {
       ],
     );
   }
+
+  int _countOrders(String status) =>
+      orders.where((order) => order.status == status).length;
+}
+
+class _ProfileOrderStatus extends StatelessWidget {
+  const _ProfileOrderStatus({
+    required this.title,
+    required this.count,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String title;
+  final int count;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 82,
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircleAvatar(
+              radius: 21,
+              backgroundColor: const Color(0xFFFFF1F4),
+              child: Icon(icon, color: const Color(0xFFE08CA0), size: 22),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11),
+            ),
+            Text(
+              '$count',
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class _ProfileShortcut extends StatelessWidget {
@@ -379,12 +492,14 @@ class SettingsScreen extends StatelessWidget {
     super.key,
     required this.user,
     required this.onOpenProfile,
+    required this.onManageDemoOrderStatuses,
     required this.onReloadCatalog,
     required this.onSignOut,
   });
 
   final User? user;
   final VoidCallback onOpenProfile;
+  final VoidCallback onManageDemoOrderStatuses;
   final VoidCallback onReloadCatalog;
   final Future<void> Function() onSignOut;
 
@@ -438,6 +553,13 @@ class SettingsScreen extends StatelessWidget {
         title: const Text('Reload product catalog'),
         subtitle: const Text('Refresh products from the catalog service'),
         onTap: onReloadCatalog,
+      ),
+      ListTile(
+        leading: const Icon(Icons.local_shipping_outlined),
+        title: const Text('Demo order statuses'),
+        subtitle: const Text('Change the status of an existing demo order'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: onManageDemoOrderStatuses,
       ),
       ListTile(
         leading: const Icon(Icons.logout, color: Colors.red),

@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:prosforagiftshop/gift_api.dart';
 import 'package:prosforagiftshop/home_page.dart';
 import 'package:prosforagiftshop/login_page.dart';
+import 'package:prosforagiftshop/orders.dart';
 import 'package:prosforagiftshop/profile.dart';
 import 'package:prosforagiftshop/shopping_screens.dart';
 
@@ -62,12 +63,14 @@ void main() {
             address: '12 Gift Lane',
             photoPath: null,
             orderCount: 2,
+            orders: const [],
             cartCount: 3,
             wishlistCount: 1,
             rewardPoints: 140,
             onEditProfile: () {},
             onChangePhoto: () {},
             onOpenOrders: () => opened.add('orders'),
+            onOpenOrdersByStatus: opened.add,
             onOpenCart: () => opened.add('cart'),
             onOpenWishlist: () => opened.add('wishlist'),
             onOpenRewards: () => opened.add('rewards'),
@@ -77,15 +80,161 @@ void main() {
       ),
     );
 
-    expect(find.text('Gift Shopper'), findsAtLeastNWidgets(2));
-    expect(find.text('shopper@example.com'), findsAtLeastNWidgets(2));
-    expect(find.text('09123456789'), findsOneWidget);
-    expect(find.text('12 Gift Lane'), findsOneWidget);
+    expect(find.text('Gift Shopper'), findsAtLeastNWidgets(1));
+    expect(find.text('shopper@example.com'), findsAtLeastNWidgets(1));
     expect(find.text('140 points'), findsOneWidget);
     expect(find.text('2'), findsOneWidget);
 
+    await tester.ensureVisible(find.text('Cart'));
     await tester.tap(find.text('Cart'));
     expect(opened, ['cart']);
+
+    await tester.drag(find.byType(ListView).first, const Offset(0, -240));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Completed'));
+    expect(opened, ['cart', 'Completed']);
+
+    await tester.drag(find.byType(ListView).first, const Offset(0, -800));
+    await tester.pumpAndSettle();
+    expect(find.text('09123456789'), findsOneWidget);
+    expect(find.text('12 Gift Lane'), findsOneWidget);
+  });
+
+  testWidgets('settings opens demo order status management', (
+    WidgetTester tester,
+  ) async {
+    var opened = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SettingsScreen(
+            user: _TestUser(),
+            onOpenProfile: () {},
+            onManageDemoOrderStatuses: () => opened = true,
+            onReloadCatalog: () {},
+            onSignOut: () async {},
+          ),
+        ),
+      ),
+    );
+
+    await tester.ensureVisible(find.text('Demo order statuses'));
+    await tester.tap(find.text('Demo order statuses'));
+    expect(opened, isTrue);
+  });
+
+  testWidgets('demo order status can be changed to cancelled', (
+    WidgetTester tester,
+  ) async {
+    final order = ShopOrder(
+      id: 'demo-status-order',
+      orderedAt: DateTime(2026, 11, 16),
+      shippingAddress: '123 Flower Street',
+      lines: const [],
+      pointsEarned: 0,
+      voucherDiscountPhp: 0,
+    );
+    String? savedStatus;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DemoOrderStatusScreen(
+          orders: [order],
+          onStatusChanged: (order, status) async {
+            savedStatus = status;
+            return true;
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(DropdownButton<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancelled').last);
+    await tester.pumpAndSettle();
+
+    expect(savedStatus, 'Cancelled');
+    expect(find.text('Cancelled'), findsOneWidget);
+  });
+
+  testWidgets('processing order cancellation requires confirmation', (
+    WidgetTester tester,
+  ) async {
+    final order = ShopOrder(
+      id: 'processing-order',
+      orderedAt: DateTime(2026, 11, 16),
+      shippingAddress: '123 Flower Street',
+      lines: const [],
+      pointsEarned: 0,
+      voucherDiscountPhp: 0,
+      status: 'Processing',
+    );
+    var cancelled = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OrdersScreen(
+            orders: [order],
+            initialStatus: 'Processing',
+            onCancelOrder: (order) async {
+              cancelled = true;
+              return true;
+            },
+            onReorderOrder: (order) async => true,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Cancel this order?'), findsOneWidget);
+    expect(cancelled, isFalse);
+
+    await tester.tap(find.text('Keep Order'));
+    await tester.pumpAndSettle();
+    expect(cancelled, isFalse);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Yes, Cancel Order'));
+    await tester.pumpAndSettle();
+    expect(cancelled, isTrue);
+  });
+
+  testWidgets('completed order can be reordered', (WidgetTester tester) async {
+    final order = ShopOrder(
+      id: 'completed-order',
+      orderedAt: DateTime(2026, 11, 16),
+      shippingAddress: '123 Flower Street',
+      lines: const [],
+      pointsEarned: 0,
+      voucherDiscountPhp: 0,
+      status: 'Completed',
+    );
+    var reordered = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OrdersScreen(
+            orders: [order],
+            initialStatus: 'Completed',
+            onCancelOrder: (order) async => false,
+            onReorderOrder: (order) async {
+              reordered = true;
+              return true;
+            },
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Reorder'));
+    await tester.pumpAndSettle();
+    expect(reordered, isTrue);
+    expect(
+      find.text('Order #completed-order added to your cart.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
@@ -366,7 +515,7 @@ void main() {
         lines: [CartLine(product: product, quantity: 2)],
         pointsEarned: 2,
         voucherDiscountPhp: 50,
-      );
+      ).copyWith(status: 'Cancelled');
 
       await store.saveShoppingData(
         'test-user',
@@ -381,6 +530,7 @@ void main() {
       expect(restored.cart.single.totalPhp, 150);
       expect(restored.orders.single.totalPhp, 250);
       expect(restored.orders.single.shippingAddress, '123 Flower Street');
+      expect(restored.orders.single.status, 'Cancelled');
       expect(restored.wallet.points, 140);
       expect(restored.wallet.creditPhp, 50);
     },
@@ -411,6 +561,25 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('₱300'), findsNWidgets(3));
+  });
+
+  testWidgets('empty cart browse button returns to the dashboard', (
+    WidgetTester tester,
+  ) async {
+    var dashboardRequested = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CartScreen(
+          lines: const [],
+          onQuantityChanged: (product, quantity) async => true,
+          onBrowseCatalog: () => dashboardRequested = true,
+          onCheckout: () {},
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Browse gifts'));
+    expect(dashboardRequested, isTrue);
   });
 
   testWidgets('checkout requires an address before placing a demo order', (

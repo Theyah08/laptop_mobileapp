@@ -60,6 +60,7 @@ class _HomePageState extends State<HomePage> {
   final FirestoreUserProfileStore profileStore = FirestoreUserProfileStore();
 
   int screenIndex = 0;
+  String initialOrdersStatus = 'All';
   late bool showNavigationDrawer;
   String selectedCategory = 'All';
   String searchQuery = '';
@@ -153,11 +154,21 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _selectScreen(int selectedScreen) {
-    setState(() => screenIndex = selectedScreen);
+    setState(() {
+      screenIndex = selectedScreen;
+      if (selectedScreen == 1) initialOrdersStatus = 'All';
+    });
   }
 
   void _handleScreenChanged(int selectedScreen) {
-    setState(() => screenIndex = selectedScreen);
+    _selectScreen(selectedScreen);
+  }
+
+  void _openOrdersByStatus(String status) {
+    setState(() {
+      screenIndex = 1;
+      initialOrdersStatus = status;
+    });
   }
 
   void _handleFooterChanged(int selectedIndex) {
@@ -481,16 +492,98 @@ class _HomePageState extends State<HomePage> {
         builder: (context) => CartScreen(
           lines: cartItems,
           onQuantityChanged: _changeCartQuantity,
-          onBrowseCatalog: _browseCatalogFromCart,
+          onBrowseCatalog: _returnToHome,
           onCheckout: _openCheckout,
         ),
       ),
     );
   }
 
-  void _browseCatalogFromCart() {
-    Navigator.of(context).pop();
-    _openItemCatalog();
+  void _openDemoOrderStatuses() {
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (context) => DemoOrderStatusScreen(
+          orders: orderHistory,
+          onStatusChanged: _updateDemoOrderStatus,
+        ),
+      ),
+    );
+  }
+
+  Future<bool> _updateDemoOrderStatus(ShopOrder order, String status) async {
+    final updatedOrders = orderHistory
+        .map(
+          (current) => current.id == order.id
+              ? current.copyWith(status: status)
+              : current,
+        )
+        .toList();
+    try {
+      await _saveShoppingData(
+        ShoppingData(
+          cart: cartItems,
+          orders: updatedOrders,
+          wallet: rewardWallet,
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Order status could not be saved: $error')),
+        );
+      }
+      return false;
+    }
+
+    if (!mounted) return false;
+    setState(() => orderHistory = updatedOrders);
+    return true;
+  }
+
+  Future<bool> _cancelOrder(ShopOrder order) {
+    if (order.status != 'Processing') return Future.value(false);
+    return _updateDemoOrderStatus(order, 'Cancelled');
+  }
+
+  Future<bool> _reorderOrder(ShopOrder order) async {
+    if (order.status != 'Completed') return false;
+    if (order.lines.isEmpty) return false;
+
+    final previousCart = cartItems;
+    final updatedCart = [...cartItems];
+    for (final line in order.lines) {
+      final index = updatedCart.indexWhere(
+        (existing) => existing.product.id == line.product.id,
+      );
+      if (index < 0) {
+        updatedCart.add(line);
+      } else {
+        updatedCart[index] = updatedCart[index].copyWith(
+          product: line.product,
+          quantity: updatedCart[index].quantity + line.quantity,
+        );
+      }
+    }
+
+    setState(() => cartItems = updatedCart);
+    try {
+      await _saveShoppingData(
+        ShoppingData(
+          cart: updatedCart,
+          orders: orderHistory,
+          wallet: rewardWallet,
+        ),
+      );
+      return true;
+    } catch (error) {
+      if (!mounted) return false;
+      setState(() => cartItems = previousCart);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Order could not be reordered: $error')),
+      );
+      return false;
+    }
   }
 
   void _openCheckout() {
@@ -620,11 +713,17 @@ class _HomePageState extends State<HomePage> {
   Widget _buildSelectedScreen(User? user) {
     switch (screenIndex) {
       case 1:
-        return OrdersScreen(orders: orderHistory);
+        return OrdersScreen(
+          orders: orderHistory,
+          initialStatus: initialOrdersStatus,
+          onCancelOrder: _cancelOrder,
+          onReorderOrder: _reorderOrder,
+        );
       case 2:
         return SettingsScreen(
           user: user,
           onOpenProfile: () => _selectScreen(4),
+          onManageDemoOrderStatuses: _openDemoOrderStatuses,
           onReloadCatalog: _confirmReloadCatalog,
           onSignOut: _signOut,
         );
@@ -643,12 +742,14 @@ class _HomePageState extends State<HomePage> {
           address: profileAddress,
           photoPath: profilePhotoPath,
           orderCount: orderHistory.length,
+          orders: orderHistory,
           cartCount: cartItems.fold(0, (total, line) => total + line.quantity),
           wishlistCount: wishlistIds.length,
           rewardPoints: rewardWallet.points,
           onEditProfile: user == null ? () {} : () => _editProfile(user),
           onChangePhoto: user == null ? () {} : () => _changeProfilePhoto(user),
           onOpenOrders: () => _selectScreen(1),
+          onOpenOrdersByStatus: _openOrdersByStatus,
           onOpenCart: _openCart,
           onOpenWishlist: () => _selectScreen(3),
           onOpenRewards: () => _selectScreen(5),
