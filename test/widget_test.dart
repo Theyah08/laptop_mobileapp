@@ -82,8 +82,15 @@ void main() {
 
     expect(find.text('Gift Shopper'), findsAtLeastNWidgets(1));
     expect(find.text('shopper@example.com'), findsAtLeastNWidgets(1));
-    expect(find.text('140 points'), findsOneWidget);
-    expect(find.text('2'), findsOneWidget);
+    expect(find.text('140 pts'), findsOneWidget);
+    expect(find.text('3 items'), findsOneWidget);
+    expect(find.text('1 item'), findsOneWidget);
+    expect(find.text('2 orders'), findsOneWidget);
+    final cartCenter = tester.getCenter(find.text('Cart'));
+    final wishlistCenter = tester.getCenter(find.text('Wishlist'));
+    final rewardsCenter = tester.getCenter(find.text('Rewards'));
+    expect((cartCenter.dy - wishlistCenter.dy).abs(), lessThan(1));
+    expect((wishlistCenter.dy - rewardsCenter.dy).abs(), lessThan(1));
 
     await tester.ensureVisible(find.text('Cart'));
     await tester.tap(find.text('Cart'));
@@ -551,16 +558,165 @@ void main() {
         home: CartScreen(
           lines: [CartLine(product: product, quantity: 1)],
           onQuantityChanged: (product, quantity) async => true,
+          onRemoveItems: (productIds) async => true,
           onBrowseCatalog: () {},
-          onCheckout: () {},
+          onCheckout: (lines) {},
         ),
       ),
     );
 
+    await tester.tap(find.byType(Checkbox));
     await tester.tap(find.byTooltip('Increase quantity'));
     await tester.pumpAndSettle();
 
     expect(find.text('₱300'), findsNWidgets(3));
+  });
+
+  testWidgets('cart totals include only checked items', (
+    WidgetTester tester,
+  ) async {
+    final firstProduct = Datum(
+      id: 'checked-total-gift',
+      itemName: 'Rose Bouquet',
+      category: 'Flowers',
+      pricePhp: 150,
+      subtitle: 'A fresh bouquet',
+    );
+    final secondProduct = Datum(
+      id: 'unchecked-total-gift',
+      itemName: 'Gift Mug',
+      category: 'Mugs',
+      pricePhp: 200,
+      subtitle: 'A gift mug',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CartScreen(
+          lines: [
+            CartLine(product: firstProduct, quantity: 1),
+            CartLine(product: secondProduct, quantity: 1),
+          ],
+          onQuantityChanged: (product, quantity) async => true,
+          onRemoveItems: (productIds) async => true,
+          onBrowseCatalog: () {},
+          onCheckout: (lines) {},
+        ),
+      ),
+    );
+
+    expect(find.text('₱0'), findsNWidgets(3));
+    await tester.tap(find.byType(Checkbox).first);
+    await tester.pump();
+
+    expect(find.text('₱150'), findsNWidgets(3));
+    expect(find.text('₱200'), findsOneWidget);
+  });
+
+  testWidgets('cart select all toggles and selected items can be deleted', (
+    WidgetTester tester,
+  ) async {
+    final firstProduct = Datum(
+      id: 'cart-gift-one',
+      itemName: 'Rose Bouquet',
+      category: 'Flowers',
+      pricePhp: 150,
+      subtitle: 'A fresh bouquet',
+    );
+    final secondProduct = Datum(
+      id: 'cart-gift-two',
+      itemName: 'Gift Mug',
+      category: 'Mugs',
+      pricePhp: 200,
+      subtitle: 'A gift mug',
+    );
+    final removedProductIds = <String>{};
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CartScreen(
+          lines: [
+            CartLine(product: firstProduct, quantity: 1),
+            CartLine(product: secondProduct, quantity: 1),
+          ],
+          onQuantityChanged: (product, quantity) async => true,
+          onRemoveItems: (productIds) async {
+            removedProductIds.addAll(productIds);
+            return true;
+          },
+          onBrowseCatalog: () {},
+          onCheckout: (lines) {},
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Select all'));
+    await tester.pump();
+    expect(
+      tester
+          .widgetList<Checkbox>(find.byType(Checkbox))
+          .every((checkbox) => checkbox.value == true),
+      isTrue,
+    );
+
+    await tester.tap(find.text('Deselect all'));
+    await tester.pump();
+    expect(
+      tester
+          .widgetList<Checkbox>(find.byType(Checkbox))
+          .every((checkbox) => checkbox.value == false),
+      isTrue,
+    );
+
+    await tester.tap(find.text('Select all'));
+    await tester.pump();
+    await tester.tap(find.text('Delete selected (2)'));
+    await tester.pumpAndSettle();
+
+    expect(removedProductIds, {'cart-gift-one', 'cart-gift-two'});
+    expect(find.text('Your cart is empty.'), findsOneWidget);
+  });
+
+  testWidgets('cart checkout receives only checked items', (
+    WidgetTester tester,
+  ) async {
+    final firstProduct = Datum(
+      id: 'checked-gift',
+      itemName: 'Rose Bouquet',
+      category: 'Flowers',
+      pricePhp: 150,
+      subtitle: 'A fresh bouquet',
+    );
+    final secondProduct = Datum(
+      id: 'unchecked-gift',
+      itemName: 'Gift Mug',
+      category: 'Mugs',
+      pricePhp: 200,
+      subtitle: 'A gift mug',
+    );
+    List<CartLine>? checkedOutLines;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CartScreen(
+          lines: [
+            CartLine(product: firstProduct, quantity: 1),
+            CartLine(product: secondProduct, quantity: 1),
+          ],
+          onQuantityChanged: (product, quantity) async => true,
+          onRemoveItems: (productIds) async => true,
+          onBrowseCatalog: () {},
+          onCheckout: (lines) => checkedOutLines = lines,
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(Checkbox).first);
+    await tester.pump();
+    await tester.tap(find.text('Proceed to Checkout (1)'));
+
+    expect(checkedOutLines, hasLength(1));
+    expect(checkedOutLines!.single.product.id, 'checked-gift');
   });
 
   testWidgets('empty cart browse button returns to the dashboard', (
@@ -572,8 +728,9 @@ void main() {
         home: CartScreen(
           lines: const [],
           onQuantityChanged: (product, quantity) async => true,
+          onRemoveItems: (productIds) async => true,
           onBrowseCatalog: () => dashboardRequested = true,
-          onCheckout: () {},
+          onCheckout: (lines) {},
         ),
       ),
     );

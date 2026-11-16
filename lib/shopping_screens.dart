@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:prosforagiftshop/main_page.dart';
 import 'package:prosforagiftshop/gift_api.dart';
 import 'package:prosforagiftshop/product.dart';
 
-const Color _shopPink = Color(0xFFE08CA0);
-const Color _checkoutBackground = Color(0xFFFFF7F9);
+const Color _shopPink = GiftShopColors.mauvelous;
+const Color _checkoutBackground = GiftShopColors.canvas;
 
 class ProductDetailsScreen extends StatefulWidget {
   const ProductDetailsScreen({
@@ -71,7 +72,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
       appBar: AppBar(
         title: const Text('Product Details'),
         backgroundColor: _shopPink,
-        foregroundColor: Colors.white,
+        foregroundColor: GiftShopColors.ink,
       ),
       body: Center(
         child: ConstrainedBox(
@@ -132,7 +133,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                   const Chip(
                     avatar: Icon(
                       Icons.check_circle,
-                      color: Colors.green,
+                      color: GiftShopColors.denim,
                       size: 18,
                     ),
                     label: Text('In stock'),
@@ -201,14 +202,16 @@ class CartScreen extends StatefulWidget {
     super.key,
     required this.lines,
     required this.onQuantityChanged,
+    required this.onRemoveItems,
     required this.onBrowseCatalog,
     required this.onCheckout,
   });
 
   final List<CartLine> lines;
   final Future<bool> Function(Datum, int) onQuantityChanged;
+  final Future<bool> Function(Set<String>) onRemoveItems;
   final VoidCallback onBrowseCatalog;
-  final VoidCallback onCheckout;
+  final ValueChanged<List<CartLine>> onCheckout;
 
   @override
   State<CartScreen> createState() => _CartScreenState();
@@ -216,6 +219,8 @@ class CartScreen extends StatefulWidget {
 
 class _CartScreenState extends State<CartScreen> {
   late List<CartLine> lines;
+  final Set<String> selectedProductIds = {};
+  bool isRemovingSelected = false;
 
   @override
   void initState() {
@@ -224,11 +229,13 @@ class _CartScreenState extends State<CartScreen> {
   }
 
   Future<void> _changeQuantity(Datum product, int quantity) async {
+    if (isRemovingSelected) return;
     final saved = await widget.onQuantityChanged(product, quantity);
     if (!saved || !mounted) return;
     setState(() {
       if (quantity < 1) {
         lines.removeWhere((line) => line.product.id == product.id);
+        selectedProductIds.remove(product.id);
       } else {
         final index = lines.indexWhere((line) => line.product.id == product.id);
         if (index >= 0) {
@@ -238,7 +245,55 @@ class _CartScreenState extends State<CartScreen> {
     });
   }
 
-  int get subtotalPhp => lines.fold(0, (total, line) => total + line.totalPhp);
+  bool get allItemsSelected =>
+      lines.isNotEmpty &&
+      lines.every((line) => selectedProductIds.contains(line.product.id));
+
+  List<CartLine> get checkedLines => lines
+      .where((line) => selectedProductIds.contains(line.product.id))
+      .toList(growable: false);
+
+  void _toggleSelectAll() {
+    if (isRemovingSelected) return;
+    setState(() {
+      if (allItemsSelected) {
+        selectedProductIds.clear();
+      } else {
+        selectedProductIds.addAll(lines.map((line) => line.product.id));
+      }
+    });
+  }
+
+  void _toggleItemSelection(String productId, bool selected) {
+    if (isRemovingSelected) return;
+    setState(() {
+      if (selected) {
+        selectedProductIds.add(productId);
+      } else {
+        selectedProductIds.remove(productId);
+      }
+    });
+  }
+
+  Future<void> _removeSelectedItems() async {
+    if (isRemovingSelected || selectedProductIds.isEmpty) return;
+    final selectedIds = Set<String>.of(selectedProductIds);
+    setState(() => isRemovingSelected = true);
+    late final bool removed;
+    try {
+      removed = await widget.onRemoveItems(selectedIds);
+    } finally {
+      if (mounted) setState(() => isRemovingSelected = false);
+    }
+    if (!mounted || !removed) return;
+    setState(() {
+      lines.removeWhere((line) => selectedIds.contains(line.product.id));
+      selectedProductIds.removeAll(selectedIds);
+    });
+  }
+
+  int get subtotalPhp =>
+      checkedLines.fold(0, (total, line) => total + line.totalPhp);
 
   IconData _categoryIcon(String category) {
     switch (normalizeGiftCategory(category)) {
@@ -262,7 +317,7 @@ class _CartScreenState extends State<CartScreen> {
     appBar: AppBar(
       title: const Text('My Cart'),
       backgroundColor: _shopPink,
-      foregroundColor: Colors.white,
+      foregroundColor: GiftShopColors.ink,
     ),
     body: lines.isEmpty
         ? Center(
@@ -283,6 +338,44 @@ class _CartScreenState extends State<CartScreen> {
           )
         : Column(
             children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                child: Row(
+                  children: [
+                    TextButton.icon(
+                      onPressed: isRemovingSelected ? null : _toggleSelectAll,
+                      icon: Icon(
+                        allItemsSelected
+                            ? Icons.check_box
+                            : Icons.check_box_outline_blank,
+                        color: _shopPink,
+                      ),
+                      label: Text(
+                        allItemsSelected ? 'Deselect all' : 'Select all',
+                      ),
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed:
+                          isRemovingSelected || selectedProductIds.isEmpty
+                          ? null
+                          : _removeSelectedItems,
+                      icon: isRemovingSelected
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.delete_outline),
+                      label: Text(
+                        selectedProductIds.isEmpty
+                            ? 'Delete selected'
+                            : 'Delete selected (${selectedProductIds.length})',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               Expanded(
                 child: ListView.separated(
                   padding: const EdgeInsets.all(16),
@@ -296,6 +389,19 @@ class _CartScreenState extends State<CartScreen> {
                         padding: const EdgeInsets.all(12),
                         child: Row(
                           children: [
+                            Checkbox(
+                              value: selectedProductIds.contains(
+                                line.product.id,
+                              ),
+                              activeColor: _shopPink,
+                              visualDensity: VisualDensity.compact,
+                              onChanged: isRemovingSelected
+                                  ? null
+                                  : (selected) => _toggleItemSelection(
+                                      line.product.id,
+                                      selected ?? false,
+                                    ),
+                            ),
                             SizedBox(
                               height: 76,
                               width: 76,
@@ -395,11 +501,17 @@ class _CartScreenState extends State<CartScreen> {
                         width: double.infinity,
                         height: 50,
                         child: FilledButton(
-                          onPressed: widget.onCheckout,
+                          onPressed: checkedLines.isEmpty || isRemovingSelected
+                              ? null
+                              : () => widget.onCheckout(checkedLines),
                           style: FilledButton.styleFrom(
                             backgroundColor: _shopPink,
                           ),
-                          child: const Text('Proceed to Checkout'),
+                          child: Text(
+                            checkedLines.isEmpty
+                                ? 'Select items to checkout'
+                                : 'Proceed to Checkout (${checkedLines.length})',
+                          ),
                         ),
                       ),
                     ],
@@ -541,7 +653,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     appBar: AppBar(
       title: const Text('Checkout'),
       backgroundColor: _checkoutBackground,
-      foregroundColor: Colors.black87,
+      foregroundColor: GiftShopColors.ink,
       elevation: 0,
     ),
     body: Center(
@@ -709,7 +821,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     onPressed: isPlacingOrder ? null : _placeOrder,
                     style: FilledButton.styleFrom(
                       backgroundColor: _shopPink,
-                      foregroundColor: Colors.white,
+                      foregroundColor: GiftShopColors.ink,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(28),
                       ),
@@ -807,29 +919,29 @@ class RewardsScreen extends StatelessWidget {
     padding: const EdgeInsets.all(20),
     children: [
       Card(
-        color: _shopPink,
+        color: GiftShopColors.cottonCandy,
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
             children: [
-              const Icon(Icons.stars, color: Colors.white, size: 38),
+              const Icon(Icons.stars, color: GiftShopColors.ink, size: 38),
               Text(
                 '${wallet.points}',
                 style: const TextStyle(
-                  color: Colors.white,
+                  color: GiftShopColors.ink,
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const Text(
                 'Available Points',
-                style: TextStyle(color: Colors.white),
+                style: TextStyle(color: GiftShopColors.ink),
               ),
               if (wallet.creditPhp > 0) ...[
                 const SizedBox(height: 8),
                 Text(
                   '₱${wallet.creditPhp} reward credit available',
-                  style: const TextStyle(color: Colors.white),
+                  style: const TextStyle(color: GiftShopColors.mutedInk),
                 ),
               ],
             ],

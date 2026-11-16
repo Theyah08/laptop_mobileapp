@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prosforagiftshop/main_page.dart';
 import 'package:prosforagiftshop/gift_api.dart';
 import 'package:prosforagiftshop/product.dart';
 
@@ -71,13 +72,13 @@ class _ItemCatalogScreenState extends State<ItemCatalogScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const accentColor = Color(0xFFE08CA0);
-    const accentTeal = Color(0xFF00A884);
+    const accentColor = GiftShopColors.mauvelous;
+    const accentTeal = GiftShopColors.denim;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Item Catalog'),
         backgroundColor: accentColor,
-        foregroundColor: Colors.white,
+        foregroundColor: GiftShopColors.ink,
         actions: [
           IconButton(
             tooltip: 'Add product',
@@ -185,7 +186,7 @@ class _ItemCatalogScreenState extends State<ItemCatalogScreen> {
                                   width: 64,
                                   height: 64,
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFFCE4EC),
+                                    color: GiftShopColors.cottonCandy,
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: productImage(

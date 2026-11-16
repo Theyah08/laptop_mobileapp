@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:prosforagiftshop/main_page.dart';
 import 'package:prosforagiftshop/gift_api.dart';
 import 'package:prosforagiftshop/product.dart';
+
+const _orderLilac = GiftShopColors.lilacFizz;
+const _orderCottonCandy = GiftShopColors.cottonCandy;
+const _orderMauvelous = GiftShopColors.mauvelous;
+const _orderPolarSky = GiftShopColors.polarSky;
+const _orderDenim = GiftShopColors.denim;
+const _orderCanvas = GiftShopColors.canvas;
 
 class WishlistScreen extends StatelessWidget {
   const WishlistScreen({
@@ -88,7 +96,7 @@ class WishlistScreen extends StatelessWidget {
                 trailing: IconButton(
                   tooltip: 'Remove from Wishlist',
                   onPressed: () => onToggleWishlist(item),
-                  icon: const Icon(Icons.favorite, color: Color(0xFFE08CA0)),
+                  icon: const Icon(Icons.favorite, color: _orderMauvelous),
                 ),
               ),
             );
@@ -157,6 +165,10 @@ class _OrdersScreenState extends State<OrdersScreen> {
   Future<void> _showSortOptions() async {
     final selectedSort = await showModalBottomSheet<_OrderSort>(
       context: context,
+      backgroundColor: _orderCanvas,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -176,8 +188,10 @@ class _OrdersScreenState extends State<OrdersScreen> {
                   _OrderSort.lowestTotal => 'Lowest total',
                 }),
                 trailing: sort == option
-                    ? const Icon(Icons.check, color: Color(0xFFE08CA0))
+                    ? const Icon(Icons.check, color: _orderMauvelous)
                     : null,
+                selected: sort == option,
+                selectedTileColor: _orderCottonCandy.withAlpha(100),
                 onTap: () => Navigator.pop(context, option),
               ),
           ],
@@ -196,88 +210,120 @@ class _OrdersScreenState extends State<OrdersScreen> {
   );
 
   @override
-  Widget build(BuildContext context) => DefaultTabController(
-    length: demoOrderStatuses.length + 1,
-    initialIndex: initialTabIndex,
-    child: Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'My Orders',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-              ),
-              Text(
-                '${widget.orders.length} orders',
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
-              ),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Search by order or item',
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: searchQuery.isEmpty
-                        ? null
-                        : IconButton(
-                            tooltip: 'Clear search',
-                            onPressed: () => setState(() => searchQuery = ''),
-                            icon: const Icon(Icons.close),
-                          ),
-                    filled: true,
-                    fillColor: Colors.white,
-                    contentPadding: EdgeInsets.zero,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
-                      borderSide: BorderSide(color: Colors.grey.shade200),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
-                      borderSide: BorderSide(color: Colors.grey.shade200),
+  Widget build(BuildContext context) => ColoredBox(
+    color: _orderCanvas,
+    child: DefaultTabController(
+      length: demoOrderStatuses.length + 1,
+      initialIndex: initialTabIndex,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'My Orders',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: GiftShopColors.ink,
                     ),
                   ),
-                  onChanged: (value) => setState(() => searchQuery = value),
                 ),
-              ),
-              const SizedBox(width: 4),
-              TextButton.icon(
-                onPressed: _showSortOptions,
-                icon: const Icon(Icons.tune),
-                label: const Text('Filter'),
-                style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFFE08CA0),
+                Text(
+                  '${widget.orders.length} orders',
+                  style: const TextStyle(
+                    color: GiftShopColors.ink,
+                    fontSize: 12,
+                  ),
                 ),
-              ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    style: const TextStyle(color: GiftShopColors.ink),
+                    decoration: InputDecoration(
+                      hintText: 'Search by order or item',
+                      hintStyle: const TextStyle(color: GiftShopColors.ink),
+                      prefixIcon: const Icon(
+                        Icons.search,
+                        color: GiftShopColors.ink,
+                      ),
+                      suffixIcon: searchQuery.isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: 'Clear search',
+                              onPressed: () => setState(() => searchQuery = ''),
+                              icon: const Icon(
+                                Icons.close,
+                                color: GiftShopColors.ink,
+                              ),
+                            ),
+                      filled: true,
+                      fillColor: Colors.white,
+                      contentPadding: EdgeInsets.zero,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide(
+                          color: _orderLilac.withAlpha(100),
+                        ),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide(
+                          color: _orderLilac.withAlpha(100),
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: const BorderSide(color: _orderMauvelous),
+                      ),
+                    ),
+                    onChanged: (value) => setState(() => searchQuery = value),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                TextButton.icon(
+                  onPressed: _showSortOptions,
+                  icon: const Icon(Icons.tune),
+                  label: const Text('Filter'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: GiftShopColors.ink,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            labelPadding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+            labelColor: GiftShopColors.ink,
+            unselectedLabelColor: GiftShopColors.ink,
+            indicatorColor: _orderMauvelous,
+            dividerColor: _orderLilac.withAlpha(100),
+            labelStyle: const TextStyle(fontWeight: FontWeight.w600),
+            tabs: [
+              const Tab(text: 'All'),
+              for (final status in demoOrderStatuses) Tab(text: status),
             ],
           ),
-        ),
-        TabBar(
-          isScrollable: true,
-          labelColor: const Color(0xFFE08CA0),
-          tabs: [
-            const Tab(text: 'All'),
-            for (final status in demoOrderStatuses) Tab(text: status),
-          ],
-        ),
-        Expanded(
-          child: TabBarView(
-            children: [
-              _orderList('All'),
-              for (final status in demoOrderStatuses) _orderList(status),
-            ],
+          Expanded(
+            child: TabBarView(
+              children: [
+                _orderList('All'),
+                for (final status in demoOrderStatuses) _orderList(status),
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     ),
   );
 }
@@ -327,10 +373,12 @@ class _DemoOrderStatusScreenState extends State<DemoOrderStatusScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
+    backgroundColor: _orderCanvas,
     appBar: AppBar(
       title: const Text('Demo order statuses'),
-      backgroundColor: const Color(0xFFE08CA0),
-      foregroundColor: Colors.white,
+      backgroundColor: _orderCanvas,
+      foregroundColor: _orderDenim,
+      elevation: 0,
     ),
     body: orders.isEmpty
         ? const Center(
@@ -353,10 +401,19 @@ class _DemoOrderStatusScreenState extends State<DemoOrderStatusScreen> {
                   ? order.status
                   : 'Processing';
               return Card(
+                color: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  side: BorderSide(color: _orderLilac.withAlpha(75)),
+                ),
                 child: ListTile(
                   title: Text(
                     'Order #${order.id}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: GiftShopColors.ink,
+                    ),
                   ),
                   subtitle: Text(
                     '${order.orderedAt.day}/${order.orderedAt.month}/${order.orderedAt.year} · ₱${order.totalPhp}',
@@ -369,6 +426,10 @@ class _DemoOrderStatusScreenState extends State<DemoOrderStatusScreen> {
                         )
                       : DropdownButton<String>(
                           value: selectedStatus,
+                          underline: Container(
+                            height: 1,
+                            color: _orderLilac.withAlpha(120),
+                          ),
                           items: demoOrderStatuses
                               .map(
                                 (status) => DropdownMenuItem<String>(
@@ -425,35 +486,45 @@ class _OrderList extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.receipt_long_outlined, size: 54, color: Colors.black26),
+            Icon(Icons.receipt_long_outlined, size: 48, color: _orderLilac),
             SizedBox(height: 12),
             Text(
               'No orders yet',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+                color: GiftShopColors.ink,
+              ),
             ),
             SizedBox(height: 6),
-            Text('Orders you place will appear here.'),
+            Text(
+              'Orders you place will appear here.',
+              style: TextStyle(color: GiftShopColors.ink),
+            ),
           ],
         ),
       );
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(8, 16, 16, 16),
       itemCount: orders.length,
       separatorBuilder: (context, index) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
         final order = orders[index];
         final statusColor = switch (order.status) {
-          'Completed' => Colors.green.shade100,
-          'Cancelled' => Colors.grey.shade300,
-          'Pending' => Colors.orange.shade100,
-          _ => const Color(0xFFFCE4EC),
+          'Completed' => _orderLilac.withAlpha(115),
+          'Cancelled' => _orderDenim.withAlpha(60),
+          'Pending' => _orderPolarSky.withAlpha(125),
+          _ => _orderCottonCandy.withAlpha(155),
         };
+        const statusTextColor = GiftShopColors.ink;
         return Card(
-          elevation: 1,
+          color: Colors.white,
+          elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: _orderLilac.withAlpha(80)),
           ),
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -465,19 +536,31 @@ class _OrderList extends StatelessWidget {
                     Expanded(
                       child: Text(
                         'Order #${order.id}',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: GiftShopColors.ink,
+                        ),
                       ),
                     ),
                     Chip(
                       label: Text(order.status),
                       backgroundColor: statusColor,
                       visualDensity: VisualDensity.compact,
+                      side: BorderSide.none,
+                      labelStyle: TextStyle(
+                        color: statusTextColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
                 ),
                 Text(
                   '${order.orderedAt.day}/${order.orderedAt.month}/${order.orderedAt.year}',
-                  style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                  style: const TextStyle(
+                    color: GiftShopColors.ink,
+                    fontSize: 12,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -501,7 +584,12 @@ class _OrderList extends StatelessWidget {
                               ),
                             ),
                           if (order.lines.length > 3)
-                            Text('+${order.lines.length - 3}'),
+                            Text(
+                              '+${order.lines.length - 3}',
+                              style: const TextStyle(
+                                color: GiftShopColors.ink,
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -510,6 +598,7 @@ class _OrderList extends StatelessWidget {
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
+                        color: GiftShopColors.ink,
                       ),
                     ),
                   ],
@@ -521,8 +610,13 @@ class _OrderList extends StatelessWidget {
                       child: OutlinedButton(
                         onPressed: () => _showOrderDetails(context, order),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFFE08CA0),
-                          side: const BorderSide(color: Color(0xFFE08CA0)),
+                          foregroundColor: GiftShopColors.ink,
+                          side: BorderSide(
+                            color: _orderMauvelous.withAlpha(180),
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                         child: const Text('View Details'),
                       ),
@@ -535,7 +629,7 @@ class _OrderList extends StatelessWidget {
                           icon: const Icon(Icons.close),
                           label: const Text('Cancel'),
                           style: TextButton.styleFrom(
-                            foregroundColor: Colors.red.shade700,
+                            foregroundColor: GiftShopColors.ink,
                           ),
                         ),
                       ),
@@ -548,7 +642,8 @@ class _OrderList extends StatelessWidget {
                           icon: const Icon(Icons.replay),
                           label: const Text('Reorder'),
                           style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFFE08CA0),
+                            backgroundColor: _orderCottonCandy,
+                            foregroundColor: GiftShopColors.ink,
                           ),
                         ),
                       ),
@@ -576,7 +671,10 @@ class _OrderList extends StatelessWidget {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+            style: FilledButton.styleFrom(
+              backgroundColor: _orderMauvelous,
+              foregroundColor: GiftShopColors.ink,
+            ),
             child: const Text('Yes, Cancel Order'),
           ),
         ],
@@ -642,7 +740,10 @@ class _OrderList extends StatelessWidget {
               const SizedBox(height: 8),
               const Text(
                 'Demo order only. No payment was collected.',
-                style: TextStyle(color: Colors.black54, fontSize: 12),
+                style: TextStyle(
+                  color: GiftShopColors.ink,
+                  fontSize: 12,
+                ),
               ),
             ],
           ),

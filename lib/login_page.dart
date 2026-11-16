@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:prosforagiftshop/main_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -10,11 +11,11 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  static const Color softPink = Color(0xFFE08CA0);
-  static const Color lightPink = Color(0xFFE8D3D8);
-  static const Color softBlue = Color(0xFF8BA9D4);
-  static const Color softPurple = Color(0xFF5D428B);
-  static const Color darkText = Color(0xFF1E1E24);
+  static const Color softPink = GiftShopColors.mauvelous;
+  static const Color lightPink = GiftShopColors.canvas;
+  static const Color softBlue = GiftShopColors.denim;
+  static const Color softPurple = GiftShopColors.mutedInk;
+  static const Color darkText = GiftShopColors.ink;
 
   // Text controllers
   final _emailController = TextEditingController();

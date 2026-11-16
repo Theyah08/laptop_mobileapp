@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:prosforagiftshop/main_page.dart';
 import 'package:prosforagiftshop/gift_api.dart';
 import 'package:prosforagiftshop/item_catalog_screen.dart';
 import 'package:prosforagiftshop/product.dart';
@@ -250,8 +251,36 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<ShopOrder> _placeOrder(String address, bool applyRewards) async {
-    if (cartItems.isEmpty) throw StateError('Your cart is empty.');
+  Future<bool> _removeCartItems(Set<String> productIds) async {
+    final previous = cartItems;
+    final updated = cartItems
+        .where((line) => !productIds.contains(line.product.id))
+        .toList();
+    if (updated.length == previous.length) return true;
+    setState(() => cartItems = updated);
+    try {
+      await _saveShoppingData(_shoppingData);
+      return true;
+    } catch (error) {
+      if (!mounted) return false;
+      setState(() => cartItems = previous);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Selected cart items could not be removed: $error'),
+        ),
+      );
+      return false;
+    }
+  }
+
+  Future<ShopOrder> _placeOrder(
+    List<CartLine> checkoutLines,
+    String address,
+    bool applyRewards,
+  ) async {
+    if (checkoutLines.isEmpty) {
+      throw StateError('Select at least one item to check out.');
+    }
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw StateError('Sign in before placing an order.');
     try {
@@ -274,7 +303,10 @@ class _HomePageState extends State<HomePage> {
       }
     }
     if (mounted) setState(() => profileAddress = address);
-    final subtotal = cartItems.fold(0, (total, line) => total + line.totalPhp);
+    final subtotal = checkoutLines.fold(
+      0,
+      (total, line) => total + line.totalPhp,
+    );
     final redemption = calculateRewardRedemption(
       wallet: rewardWallet,
       subtotalPhp: subtotal,
@@ -284,7 +316,7 @@ class _HomePageState extends State<HomePage> {
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       orderedAt: DateTime.now(),
       shippingAddress: address,
-      lines: List<CartLine>.unmodifiable(cartItems),
+      lines: List<CartLine>.unmodifiable(checkoutLines),
       pointsEarned: rewardPointsForPurchase(subtotal),
       voucherDiscountPhp: redemption.discountPhp,
     );
@@ -294,16 +326,22 @@ class _HomePageState extends State<HomePage> {
           rewardWallet.points - redemption.pointsRedeemed + order.pointsEarned,
       creditPhp: rewardWallet.creditPhp - redemption.creditUsedPhp,
     );
+    final checkedProductIds = checkoutLines
+        .map((line) => line.product.id)
+        .toSet();
+    final remainingCart = cartItems
+        .where((line) => !checkedProductIds.contains(line.product.id))
+        .toList();
     await _saveShoppingData(
       ShoppingData(
-        cart: const [],
+        cart: remainingCart,
         orders: updatedOrders,
         wallet: updatedWallet,
       ),
     );
     if (mounted) {
       setState(() {
-        cartItems = [];
+        cartItems = remainingCart;
         orderHistory = updatedOrders;
         rewardWallet = updatedWallet;
       });
@@ -492,6 +530,7 @@ class _HomePageState extends State<HomePage> {
         builder: (context) => CartScreen(
           lines: cartItems,
           onQuantityChanged: _changeCartQuantity,
+          onRemoveItems: _removeCartItems,
           onBrowseCatalog: _returnToHome,
           onCheckout: _openCheckout,
         ),
@@ -586,16 +625,17 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _openCheckout() {
-    if (cartItems.isEmpty) return;
+  void _openCheckout(List<CartLine> checkoutLines) {
+    if (checkoutLines.isEmpty) return;
     Navigator.push<void>(
       context,
       MaterialPageRoute<void>(
         builder: (context) => CheckoutScreen(
-          lines: cartItems,
+          lines: List<CartLine>.unmodifiable(checkoutLines),
           wallet: rewardWallet,
           initialAddress: profileAddress,
-          onPlaceOrder: _placeOrder,
+          onPlaceOrder: (address, applyRewards) =>
+              _placeOrder(checkoutLines, address, applyRewards),
           onViewOrders: _returnToOrders,
           onContinueShopping: _returnToHome,
         ),
@@ -826,8 +866,8 @@ class _HomePageState extends State<HomePage> {
           letterSpacing: 0.3,
         ),
       ),
-      backgroundColor: const Color(0xFFE08CA0),
-      foregroundColor: Colors.white,
+      backgroundColor: GiftShopColors.mauvelous,
+      foregroundColor: GiftShopColors.ink,
       actions: _buildAppBarActions(),
     ),
     drawer: _buildNavigationDrawer(user),
@@ -835,7 +875,7 @@ class _HomePageState extends State<HomePage> {
     bottomNavigationBar: Container(
       margin: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E1E1E),
+        color: GiftShopColors.ink,
         borderRadius: BorderRadius.circular(30),
       ),
       child: ClipRRect(
@@ -844,8 +884,8 @@ class _HomePageState extends State<HomePage> {
           currentIndex: screenIndex == 4 ? 1 : 0,
           onTap: _handleFooterChanged,
           backgroundColor: Colors.transparent,
-          selectedItemColor: Colors.white,
-          unselectedItemColor: Colors.white38,
+          selectedItemColor: GiftShopColors.mauvelous,
+          unselectedItemColor: GiftShopColors.lilacFizz,
           showSelectedLabels: true,
           showUnselectedLabels: true,
           items: const [
@@ -872,108 +912,156 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildNavigationDrawer(User? user) {
     final avatarImage = profileImageProvider(profilePhotoPath, user?.photoURL);
-    return NavigationDrawer(
-      selectedIndex: screenIndex < destinations.length ? screenIndex : null,
-      onDestinationSelected: (index) {
-        _handleScreenChanged(index);
-        Navigator.pop(context);
-      },
-      children: [
-        UserAccountsDrawerHeader(
-          decoration: const BoxDecoration(color: Color(0xFFE08CA0)),
-          accountName: Text(
-            user?.displayName?.isNotEmpty == true
-                ? user!.displayName!
-                : 'Prosfora Customer',
+    const drawerRowPadding = EdgeInsets.only(left: 30, right: 16);
+    return NavigationDrawerTheme(
+      data: const NavigationDrawerThemeData(tileHeight: 48),
+      child: NavigationDrawer(
+        selectedIndex: switch (screenIndex) {
+          0 => 0,
+          4 => 1,
+          1 => 2,
+          _ => null,
+        },
+        tilePadding: const EdgeInsets.only(left: 24, right: 12),
+        onDestinationSelected: (index) {
+          final selectedScreen = switch (index) {
+            0 => 0,
+            1 => 4,
+            2 => 1,
+            _ => screenIndex,
+          };
+          _handleScreenChanged(selectedScreen);
+          Navigator.pop(context);
+        },
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            decoration: BoxDecoration(
+              color: GiftShopColors.cottonCandy,
+              border: Border(
+                bottom: BorderSide(color: GiftShopColors.ink.withAlpha(100)),
+              ),
+            ),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 36,
+                  backgroundColor: Colors.white,
+                  backgroundImage: avatarImage,
+                  child: avatarImage == null
+                      ? const Icon(
+                          Icons.card_giftcard,
+                          color: GiftShopColors.mauvelous,
+                        )
+                      : null,
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        user?.displayName?.isNotEmpty == true
+                            ? user!.displayName!
+                            : 'Prosfora Customer',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: GiftShopColors.ink,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        user?.email ?? 'No email',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: GiftShopColors.mutedInk),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-          accountEmail: Text(user?.email ?? 'No email'),
-          currentAccountPicture: CircleAvatar(
-            backgroundColor: Colors.white,
-            backgroundImage: avatarImage,
-            child: avatarImage == null
-                ? const Icon(Icons.card_giftcard, color: Color(0xFFE08CA0))
-                : null,
+          const NavigationDrawerDestination(
+            label: Text('Dashboard'),
+            icon: Icon(Icons.store_outlined),
+            selectedIcon: Icon(Icons.store),
           ),
-        ),
-        ...destinations.map(
-          (destination) => NavigationDrawerDestination(
-            label: Text(destination.label),
-            icon: destination.icon,
-            selectedIcon: destination.selectedIcon,
+          const NavigationDrawerDestination(
+            label: Text('My Profile'),
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person),
           ),
-        ),
-        const Divider(),
-        ListTile(
-          leading: const Icon(Icons.person_outline),
-          title: const Text('My Profile'),
-          trailing: const Icon(Icons.chevron_right, size: 20),
-          onTap: () {
-            Navigator.pop(context);
-            _selectScreen(4);
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.favorite_border),
-          title: const Text('Wishlist'),
-          trailing: const Icon(Icons.chevron_right, size: 20),
-          onTap: () {
-            Navigator.pop(context);
-            _selectScreen(3);
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.stars_outlined),
-          title: const Text('Rewards'),
-          trailing: const Icon(Icons.chevron_right, size: 20),
-          onTap: () {
-            Navigator.pop(context);
-            _selectScreen(5);
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.view_list_outlined),
-          title: const Text('Item Catalog'),
-          trailing: const Icon(Icons.chevron_right, size: 20),
-          onTap: () {
-            Navigator.pop(context);
-            _openItemCatalog();
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.notifications_outlined),
-          title: const Text('Notifications'),
-          trailing: const Icon(Icons.chevron_right, size: 20),
-          onTap: () {
-            Navigator.pop(context);
-            _showInfo(
-              'Notifications',
-              'Push notifications are not configured in this app.',
-            );
-          },
-        ),
-        const Divider(),
-        ListTile(
-          leading: const Icon(Icons.logout, color: Colors.red),
-          title: const Text('Sign Out', style: TextStyle(color: Colors.red)),
-          onTap: () async {
-            await _signOut();
-            if (mounted) Navigator.pushReplacementNamed(context, '/login');
-          },
-        ),
-      ],
-    );
-  }
-
-  void _showInfo(String title, String message) {
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
+          const NavigationDrawerDestination(
+            label: Text('Orders'),
+            icon: Icon(Icons.shopping_bag_outlined),
+            selectedIcon: Icon(Icons.shopping_bag),
+          ),
+          const Divider(height: 8),
+          ListTile(
+            leading: const Icon(Icons.favorite_border),
+            title: const Text('Wishlist'),
+            trailing: const Icon(Icons.chevron_right, size: 20),
+            contentPadding: drawerRowPadding,
+            minTileHeight: 48,
+            onTap: () {
+              Navigator.pop(context);
+              _selectScreen(3);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.stars_outlined),
+            title: const Text('Rewards'),
+            trailing: const Icon(Icons.chevron_right, size: 20),
+            contentPadding: drawerRowPadding,
+            minTileHeight: 48,
+            onTap: () {
+              Navigator.pop(context);
+              _selectScreen(5);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.view_list_outlined),
+            title: const Text('Item Catalog'),
+            trailing: const Icon(Icons.chevron_right, size: 20),
+            contentPadding: drawerRowPadding,
+            minTileHeight: 48,
+            onTap: () {
+              Navigator.pop(context);
+              _openItemCatalog();
+            },
+          ),
+          ListTile(
+            leading: Icon(
+              screenIndex == 2 ? Icons.settings : Icons.settings_outlined,
+            ),
+            title: const Text('Settings'),
+            trailing: const Icon(Icons.chevron_right, size: 20),
+            contentPadding: drawerRowPadding,
+            minTileHeight: 48,
+            selected: screenIndex == 2,
+            selectedTileColor: GiftShopColors.denim,
+            selectedColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(28),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              _selectScreen(2);
+            },
+          ),
+          const Divider(height: 8),
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.red),
+            title: const Text('Sign Out', style: TextStyle(color: Colors.red)),
+            onTap: () async {
+              await _signOut();
+              if (mounted) Navigator.pushReplacementNamed(context, '/login');
+            },
           ),
         ],
       ),
@@ -991,8 +1079,8 @@ class _HomePageState extends State<HomePage> {
           letterSpacing: 0.3,
         ),
       ),
-      backgroundColor: const Color(0xFFE08CA0),
-      foregroundColor: Colors.white,
+      backgroundColor: GiftShopColors.mauvelous,
+      foregroundColor: GiftShopColors.ink,
       actions: _buildAppBarActions(),
     ),
     body: SafeArea(
@@ -1104,11 +1192,11 @@ class HomeDashboard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const primaryColor = Color(0xFFE08CA0);
-    const accentPink = Color(0xFFE08CA0);
+    const primaryColor = GiftShopColors.mauvelous;
+    const accentPink = GiftShopColors.mauvelous;
     final isSearching = searchQuery.trim().isNotEmpty;
     return ColoredBox(
-      color: const Color(0xFFFFF7F9),
+      color: GiftShopColors.canvas,
       child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         child: Center(
@@ -1161,7 +1249,7 @@ class HomeDashboard extends StatelessWidget {
                           ),
                           child: Icon(
                             searchQuery.isEmpty ? Icons.search : Icons.close,
-                            color: Colors.white,
+                            color: GiftShopColors.ink,
                             size: 16,
                           ),
                         ),
@@ -1252,7 +1340,7 @@ class HomeDashboard extends StatelessWidget {
                                         onCategorySelected('Flowers'),
                                     style: FilledButton.styleFrom(
                                       backgroundColor: accentPink,
-                                      foregroundColor: Colors.white,
+                                      foregroundColor: GiftShopColors.ink,
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 14,
                                         vertical: 7,
@@ -1302,7 +1390,7 @@ class HomeDashboard extends StatelessWidget {
                           'Orders',
                           '$orderCount Orders',
                           Icons.receipt_long_outlined,
-                          Colors.orange,
+                          GiftShopColors.denim,
                           onTap: onOpenOrders,
                         ),
                       ),
@@ -1312,7 +1400,7 @@ class HomeDashboard extends StatelessWidget {
                           'Wishlist',
                           '$wishlistCount Items',
                           Icons.favorite_border,
-                          Colors.pink,
+                          GiftShopColors.mauvelous,
                           onTap: onOpenWishlist,
                         ),
                       ),
@@ -1322,7 +1410,7 @@ class HomeDashboard extends StatelessWidget {
                           'Rewards',
                           '$rewardPoints Points',
                           Icons.stars_outlined,
-                          Colors.purple,
+                          GiftShopColors.lilacFizz,
                           onTap: onOpenRewards,
                         ),
                       ),
@@ -1344,12 +1432,16 @@ class HomeDashboard extends StatelessWidget {
                             chip,
                             style: TextStyle(
                               fontSize: 12,
-                              color: isSelected ? Colors.white : Colors.black87,
+                              color: isSelected
+                                  ? GiftShopColors.ink
+                                  : GiftShopColors.mutedInk,
                             ),
                           ),
                           selected: isSelected,
                           selectedColor: accentPink,
-                          backgroundColor: Colors.grey.shade100,
+                          backgroundColor: GiftShopColors.polarSky.withAlpha(
+                            90,
+                          ),
                           showCheckmark: false,
                           onSelected: (_) => onCategorySelected(chip),
                         );
@@ -1544,7 +1636,7 @@ class HomeDashboard extends StatelessWidget {
   );
 
   Widget _productCard(Datum item, IconData icon) {
-    const accentPink = Color(0xFFE08CA0);
+    const accentPink = GiftShopColors.mauvelous;
     return Card(
       color: Colors.white,
       elevation: 1,
@@ -1561,7 +1653,7 @@ class HomeDashboard extends StatelessWidget {
                 child: Container(
                   width: double.infinity,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFCE4EC),
+                    color: GiftShopColors.cottonCandy,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: productImage(item, icon),
@@ -1603,7 +1695,7 @@ class HomeDashboard extends StatelessWidget {
                     onPressed: () => onAddToCart(item),
                     icon: const Icon(
                       Icons.add_shopping_cart_outlined,
-                      color: Color(0xFFE08CA0),
+                      color: GiftShopColors.mauvelous,
                     ),
                     visualDensity: VisualDensity.compact,
                   ),

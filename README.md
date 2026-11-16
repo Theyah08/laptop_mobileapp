@@ -67,6 +67,11 @@ data URLs); Firebase Storage is needed to share uploaded photos across devices.
 
 ## Shopping demo
 
+The app uses a shared pastel gift-shop theme: Mauvelous for headers, Cotton
+Candy for Wishlist, Lilac Fizz for Rewards, Polar Sky for Cart/Pending, and
+Denim for Cancelled order accents, with dark ink text for readability and a
+cool muted coconut-white canvas.
+
 The signed-in app supports product details, wishlist, cart quantity updates,
 delivery-address checkout, order history, and reward points. Cart, demo orders,
 and reward balances are saved locally on the current device under the signed-in

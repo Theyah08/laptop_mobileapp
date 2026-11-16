@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:prosforagiftshop/main_page.dart';
 import 'package:prosforagiftshop/gift_api.dart';
 
 class ProductEditorDialog extends StatefulWidget {
@@ -264,8 +265,8 @@ class _ProductEditorDialogState extends State<ProductEditorDialog> {
         ElevatedButton(
           onPressed: isPickingImage ? null : _save,
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFFE08CA0),
-            foregroundColor: Colors.white,
+            backgroundColor: GiftShopColors.mauvelous,
+            foregroundColor: GiftShopColors.ink,
           ),
           child: const Text('Save'),
         ),
@@ -285,7 +286,7 @@ Widget productImage(Datum item, IconData fallbackIcon) {
         height: double.infinity,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) =>
-            Icon(fallbackIcon, color: const Color(0xFFE08CA0), size: 40),
+            Icon(fallbackIcon, color: GiftShopColors.mauvelous, size: 40),
       ),
     );
   }
@@ -298,13 +299,13 @@ Widget productImage(Datum item, IconData fallbackIcon) {
         height: double.infinity,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) =>
-            Icon(fallbackIcon, color: const Color(0xFFE08CA0), size: 40),
+            Icon(fallbackIcon, color: GiftShopColors.mauvelous, size: 40),
       ),
     );
   }
   final asset = imageAssetForProduct(item);
   if (asset == null) {
-    return Icon(fallbackIcon, color: const Color(0xFFE08CA0), size: 40);
+    return Icon(fallbackIcon, color: GiftShopColors.mauvelous, size: 40);
   }
   return ClipRRect(
     borderRadius: BorderRadius.circular(12),
@@ -314,7 +315,7 @@ Widget productImage(Datum item, IconData fallbackIcon) {
       height: double.infinity,
       fit: BoxFit.cover,
       errorBuilder: (context, error, stackTrace) =>
-          Icon(fallbackIcon, color: const Color(0xFFE08CA0), size: 40),
+          Icon(fallbackIcon, color: GiftShopColors.mauvelous, size: 40),
     ),
   );
 }
