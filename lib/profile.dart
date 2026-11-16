@@ -5,19 +5,37 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:prosforagiftshop/gift_api.dart';
 
-Future<String?> showProfileEditDialog({
+typedef ProfileEditResult = ({String phone, String address});
+
+ImageProvider<Object>? profileImageProvider(
+  String? localPhoto,
+  String? photoUrl,
+) {
+  final photoBytes = imageBytesFromDataUrl(localPhoto);
+  if (photoBytes != null) return MemoryImage(photoBytes);
+  if (!kIsWeb && localPhoto != null && File(localPhoto).existsSync()) {
+    return FileImage(File(localPhoto));
+  }
+  return photoUrl == null ? null : NetworkImage(photoUrl);
+}
+
+Future<ProfileEditResult?> showProfileEditDialog({
   required BuildContext context,
   required User user,
   required String phone,
-  required Future<void> Function(String name, String phone) onSave,
+  required String address,
+  required Future<void> Function(String name, String phone, String address)
+  onSave,
 }) async {
   final nameController = TextEditingController(text: user.displayName ?? '');
   final phoneController = TextEditingController(text: phone);
+  final addressController = TextEditingController(text: address);
   final formKey = GlobalKey<FormState>();
-  final result = await showDialog<String>(
+  final result = await showDialog<ProfileEditResult>(
     context: context,
     builder: (dialogContext) => AlertDialog(
       title: const Text('Edit profile'),
+      scrollable: true,
       content: Form(
         key: formKey,
         child: Column(
@@ -35,6 +53,11 @@ Future<String?> showProfileEditDialog({
               keyboardType: TextInputType.phone,
               decoration: const InputDecoration(labelText: 'Phone number'),
             ),
+            TextFormField(
+              controller: addressController,
+              maxLines: 2,
+              decoration: const InputDecoration(labelText: 'Address'),
+            ),
           ],
         ),
       ),
@@ -50,9 +73,13 @@ Future<String?> showProfileEditDialog({
               await onSave(
                 nameController.text.trim(),
                 phoneController.text.trim(),
+                addressController.text.trim(),
               );
               if (dialogContext.mounted) {
-                Navigator.pop(dialogContext, phoneController.text.trim());
+                Navigator.pop(dialogContext, (
+                  phone: phoneController.text.trim(),
+                  address: addressController.text.trim(),
+                ));
               }
             } catch (error) {
               if (dialogContext.mounted) {
@@ -69,6 +96,7 @@ Future<String?> showProfileEditDialog({
   );
   nameController.dispose();
   phoneController.dispose();
+  addressController.dispose();
   return result;
 }
 
@@ -77,17 +105,35 @@ class ProfileScreen extends StatelessWidget {
     super.key,
     required this.user,
     required this.phone,
+    required this.address,
     required this.photoPath,
+    required this.orderCount,
+    required this.cartCount,
+    required this.wishlistCount,
+    required this.rewardPoints,
     required this.onEditProfile,
     required this.onChangePhoto,
+    required this.onOpenOrders,
+    required this.onOpenCart,
+    required this.onOpenWishlist,
+    required this.onOpenRewards,
     required this.onSignOut,
   });
 
   final User? user;
   final String phone;
+  final String address;
   final String? photoPath;
+  final int orderCount;
+  final int cartCount;
+  final int wishlistCount;
+  final int rewardPoints;
   final VoidCallback onEditProfile;
   final VoidCallback onChangePhoto;
+  final VoidCallback onOpenOrders;
+  final VoidCallback onOpenCart;
+  final VoidCallback onOpenWishlist;
+  final VoidCallback onOpenRewards;
   final Future<void> Function() onSignOut;
 
   @override
@@ -97,49 +143,131 @@ class ProfileScreen extends StatelessWidget {
       return const Center(child: Text('Sign in to view your profile.'));
     }
     final localPhoto = photoPath;
-    final photoBytes = imageBytesFromDataUrl(localPhoto);
-    final ImageProvider<Object>? photoProvider = photoBytes != null
-        ? MemoryImage(photoBytes)
-        : (!kIsWeb && localPhoto != null && File(localPhoto).existsSync()
-              ? FileImage(File(localPhoto))
-              : (currentUser.photoURL == null
-                    ? null
-                    : NetworkImage(currentUser.photoURL!)));
+    final photoProvider = profileImageProvider(
+      localPhoto,
+      currentUser.photoURL,
+    );
+    final displayName = currentUser.displayName?.isNotEmpty == true
+        ? currentUser.displayName!
+        : 'Prosfora Customer';
     return ListView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       children: [
-        const SizedBox(height: 12),
-        Center(
-          child: Stack(
-            children: [
-              CircleAvatar(
-                radius: 48,
-                backgroundColor: const Color(0xFFFCE4EC),
-                backgroundImage: photoProvider,
-                child: localPhoto == null && currentUser.photoURL == null
-                    ? const Icon(
-                        Icons.person,
-                        size: 46,
-                        color: Color(0xFFE08CA0),
-                      )
-                    : null,
-              ),
-              Positioned(
-                right: 0,
-                bottom: 0,
-                child: IconButton.filled(
-                  tooltip: 'Change profile photo',
-                  onPressed: onChangePhoto,
-                  icon: const Icon(Icons.photo_camera_outlined),
+        Card(
+          color: const Color(0xFFE08CA0),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Stack(
+                  children: [
+                    CircleAvatar(
+                      radius: 36,
+                      backgroundColor: Colors.white,
+                      backgroundImage: photoProvider,
+                      child: photoProvider == null
+                          ? const Icon(
+                              Icons.person,
+                              size: 36,
+                              color: Color(0xFFE08CA0),
+                            )
+                          : null,
+                    ),
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: IconButton.filled(
+                        tooltip: 'Change profile photo',
+                        onPressed: onChangePhoto,
+                        icon: const Icon(Icons.photo_camera_outlined),
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: const Color(0xFFE08CA0),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        currentUser.email ?? 'No email',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Edit profile',
+                  onPressed: onEditProfile,
+                  color: Colors.white,
+                  icon: const Icon(Icons.edit_outlined),
+                ),
+              ],
+            ),
           ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 8),
+        GridView.count(
+          crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          childAspectRatio: 2.2,
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          children: [
+            _ProfileShortcut(
+              title: 'Orders',
+              value: '$orderCount',
+              icon: Icons.receipt_long_outlined,
+              onTap: onOpenOrders,
+            ),
+            _ProfileShortcut(
+              title: 'Cart',
+              value: '$cartCount',
+              icon: Icons.shopping_cart_outlined,
+              onTap: onOpenCart,
+            ),
+            _ProfileShortcut(
+              title: 'Wishlist',
+              value: '$wishlistCount',
+              icon: Icons.favorite_border,
+              onTap: onOpenWishlist,
+            ),
+            _ProfileShortcut(
+              title: 'Rewards',
+              value: '$rewardPoints points',
+              icon: Icons.stars_outlined,
+              onTap: onOpenRewards,
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
         Card(
           child: Column(
             children: [
+              const ListTile(
+                title: Text(
+                  'My Account',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
               ListTile(
                 leading: const Icon(Icons.person_outline),
                 title: const Text('Name'),
@@ -161,27 +289,89 @@ class ProfileScreen extends StatelessWidget {
                 title: const Text('Phone'),
                 subtitle: Text(phone.isEmpty ? 'Not set' : phone),
               ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.location_on_outlined),
+                title: const Text('Address'),
+                subtitle: Text(address.isEmpty ? 'Not set' : address),
+              ),
             ],
           ),
         ),
-        const SizedBox(height: 12),
-        ElevatedButton.icon(
-          onPressed: onEditProfile,
-          icon: const Icon(Icons.edit_outlined),
-          label: const Text('Edit profile'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFFE08CA0),
-            foregroundColor: Colors.white,
+        const SizedBox(height: 8),
+        Card(
+          child: Column(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit profile'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: onEditProfile,
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.red),
+                title: const Text(
+                  'Sign out',
+                  style: TextStyle(color: Colors.red),
+                ),
+                onTap: onSignOut,
+              ),
+            ],
           ),
-        ),
-        TextButton.icon(
-          onPressed: onSignOut,
-          icon: const Icon(Icons.logout, color: Colors.red),
-          label: const Text('Sign out', style: TextStyle(color: Colors.red)),
         ),
       ],
     );
   }
+}
+
+class _ProfileShortcut extends StatelessWidget {
+  const _ProfileShortcut({
+    required this.title,
+    required this.value,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String title;
+  final String value;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            Icon(icon, color: const Color(0xFFE08CA0)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    title,
+                    style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class SettingsScreen extends StatelessWidget {
@@ -240,7 +430,7 @@ class SettingsScreen extends StatelessWidget {
         onTap: () => _showInfo(
           context,
           'Privacy and account',
-          'Wishlist, profile phone, and profile photo are stored locally on this device under your Firebase account ID. They are not synced between devices.',
+          'Profile name, email, phone, and address are saved in your private Firestore profile. Wishlist, cart, orders, rewards, and profile photo stay on this device.',
         ),
       ),
       ListTile(

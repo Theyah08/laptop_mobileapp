@@ -56,6 +56,22 @@ active project or the user is not signed in. The rules allow any signed-in
 user to edit the catalog; restrict write rules to an admin claim before using
 this with untrusted users.
 
+Profile details are stored separately in `profiles/{uid}`. The profile rules
+allow each signed-in user to read and update only their own name, email, phone,
+and address. Checkout pre-fills the saved address and refreshes it when an
+order is placed.
+
 Bundled product images are referenced by their asset paths. Images picked from
-a device are still saved as local paths (or browser data URLs); Firebase Storage
-is needed to share uploaded photos across devices.
+a device for products or profiles are still saved as local paths (or browser
+data URLs); Firebase Storage is needed to share uploaded photos across devices.
+
+## Shopping demo
+
+The signed-in app supports product details, wishlist, cart quantity updates,
+delivery-address checkout, order history, and reward points. Cart, demo orders,
+and reward balances are saved locally on the current device under the signed-in
+account. Checkout is a local demonstration only: it does not collect payment or
+send an order to a fulfillment service. Customers earn 1 point per PHP 100
+spent. At checkout, rewards are optional; every 200 points apply PHP 10 off,
+up to the order subtotal. The Rewards screen can also convert 200 points into
+PHP 10 of local reward credit.

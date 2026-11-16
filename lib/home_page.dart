@@ -6,6 +6,7 @@ import 'package:prosforagiftshop/item_catalog_screen.dart';
 import 'package:prosforagiftshop/product.dart';
 import 'package:prosforagiftshop/orders.dart';
 import 'package:prosforagiftshop/profile.dart';
+import 'package:prosforagiftshop/shopping_screens.dart';
 
 class ExampleDestination {
   const ExampleDestination(this.label, this.icon, this.selectedIcon);
@@ -41,6 +42,7 @@ const List<ExampleDestination> wideDestinations = <ExampleDestination>[
     Icon(Icons.favorite),
   ),
   ExampleDestination('Profile', Icon(Icons.person_outline), Icon(Icons.person)),
+  ExampleDestination('Rewards', Icon(Icons.stars_outlined), Icon(Icons.stars)),
 ];
 
 class HomePage extends StatefulWidget {
@@ -55,6 +57,7 @@ class _HomePageState extends State<HomePage> {
   final TextEditingController searchController = TextEditingController();
   final CatalogApi catalogStore = FirestoreGiftCatalogStore();
   final UserLocalStore userStore = UserLocalStore();
+  final FirestoreUserProfileStore profileStore = FirestoreUserProfileStore();
 
   int screenIndex = 0;
   late bool showNavigationDrawer;
@@ -62,7 +65,11 @@ class _HomePageState extends State<HomePage> {
   String searchQuery = '';
   late Future<Item> productsFuture;
   Set<String> wishlistIds = {};
+  List<CartLine> cartItems = [];
+  List<ShopOrder> orderHistory = [];
+  RewardWallet rewardWallet = const RewardWallet();
   String profilePhone = '';
+  String profileAddress = '';
   String? profilePhotoPath;
   bool userDataLoading = true;
   bool productOperationInProgress = false;
@@ -86,18 +93,63 @@ class _HomePageState extends State<HomePage> {
       if (mounted) setState(() => userDataLoading = false);
       return;
     }
-    final values = await Future.wait([
-      userStore.loadWishlist(uid),
-      userStore.loadPhone(uid),
-      userStore.loadProfilePhoto(uid),
-    ]);
-    if (!mounted) return;
-    setState(() {
-      wishlistIds = values[0] as Set<String>;
-      profilePhone = values[1] as String;
-      profilePhotoPath = values[2] as String?;
-      userDataLoading = false;
-    });
+    try {
+      final values = await Future.wait([
+        userStore.loadWishlist(uid),
+        userStore.loadPhone(uid),
+        userStore.loadProfilePhoto(uid),
+        userStore.loadShoppingData(uid),
+      ]);
+      if (!mounted) return;
+      final shoppingData = values[3] as ShoppingData;
+      final recentAddress = shoppingData.orders
+          .map((order) => order.shippingAddress)
+          .firstWhere((address) => address.isNotEmpty, orElse: () => '');
+      UserProfileRecord? savedProfile;
+      try {
+        savedProfile = await profileStore.load(uid);
+        if (savedProfile == null) {
+          final currentUser = FirebaseAuth.instance.currentUser;
+          if (currentUser != null) {
+            savedProfile = UserProfileRecord(
+              displayName: currentUser.displayName ?? '',
+              email: currentUser.email ?? '',
+              phone: values[1] as String,
+              address: recentAddress,
+            );
+            await profileStore.save(uid, savedProfile);
+          }
+        }
+      } catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Profile data could not be synced: $error')),
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        wishlistIds = values[0] as Set<String>;
+        profilePhone = savedProfile?.phone.isNotEmpty == true
+            ? savedProfile!.phone
+            : values[1] as String;
+        profileAddress = savedProfile?.address.isNotEmpty == true
+            ? savedProfile!.address
+            : recentAddress;
+        profilePhotoPath = values[2] as String?;
+        cartItems = shoppingData.cart;
+        orderHistory = shoppingData.orders;
+        rewardWallet = shoppingData.wallet;
+        userDataLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => userDataLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Saved account data could not be loaded: $error'),
+        ),
+      );
+    }
   }
 
   void _selectScreen(int selectedScreen) {
@@ -108,12 +160,171 @@ class _HomePageState extends State<HomePage> {
     setState(() => screenIndex = selectedScreen);
   }
 
+  void _handleFooterChanged(int selectedIndex) {
+    switch (selectedIndex) {
+      case 0:
+        _selectScreen(0);
+      case 1:
+        _selectScreen(4);
+      case 2:
+        _openCart();
+    }
+  }
+
   Future<Item> _reloadProducts() {
     final future = catalogStore.loadCatalog();
     setState(() {
       productsFuture = future;
     });
     return future;
+  }
+
+  ShoppingData get _shoppingData =>
+      ShoppingData(cart: cartItems, orders: orderHistory, wallet: rewardWallet);
+
+  Future<void> _saveShoppingData(ShoppingData data) async {
+    final uid = _currentUserId;
+    if (uid == null) throw StateError('Sign in to save shopping data.');
+    await userStore.saveShoppingData(uid, data);
+  }
+
+  Future<bool> _addToCart(Datum product, int quantity) async {
+    final previous = cartItems;
+    final updated = [...cartItems];
+    final index = updated.indexWhere((line) => line.product.id == product.id);
+    if (index < 0) {
+      updated.add(CartLine(product: product, quantity: quantity));
+    } else {
+      updated[index] = updated[index].copyWith(
+        product: product,
+        quantity: updated[index].quantity + quantity,
+      );
+    }
+    setState(() => cartItems = updated);
+    try {
+      await _saveShoppingData(_shoppingData);
+      return true;
+    } catch (error) {
+      if (mounted) {
+        setState(() => cartItems = previous);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Cart could not be saved: $error')),
+        );
+      }
+      return false;
+    }
+  }
+
+  Future<bool> _changeCartQuantity(Datum product, int quantity) async {
+    final previous = cartItems;
+    final updated = [...cartItems];
+    final index = updated.indexWhere((line) => line.product.id == product.id);
+    if (index < 0) return false;
+    if (quantity < 1) {
+      updated.removeAt(index);
+    } else {
+      updated[index] = updated[index].copyWith(quantity: quantity);
+    }
+    setState(() => cartItems = updated);
+    try {
+      await _saveShoppingData(_shoppingData);
+      return true;
+    } catch (error) {
+      if (!mounted) return false;
+      setState(() => cartItems = previous);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Cart could not be saved: $error')),
+      );
+      return false;
+    }
+  }
+
+  Future<ShopOrder> _placeOrder(String address, bool applyRewards) async {
+    if (cartItems.isEmpty) throw StateError('Your cart is empty.');
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw StateError('Sign in before placing an order.');
+    try {
+      await profileStore.save(
+        user.uid,
+        UserProfileRecord(
+          displayName: user.displayName ?? '',
+          email: user.email ?? '',
+          phone: profilePhone,
+          address: address,
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Profile address could not be synced: $error'),
+          ),
+        );
+      }
+    }
+    if (mounted) setState(() => profileAddress = address);
+    final subtotal = cartItems.fold(0, (total, line) => total + line.totalPhp);
+    final redemption = calculateRewardRedemption(
+      wallet: rewardWallet,
+      subtotalPhp: subtotal,
+      applyRewards: applyRewards,
+    );
+    final order = ShopOrder(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      orderedAt: DateTime.now(),
+      shippingAddress: address,
+      lines: List<CartLine>.unmodifiable(cartItems),
+      pointsEarned: rewardPointsForPurchase(subtotal),
+      voucherDiscountPhp: redemption.discountPhp,
+    );
+    final updatedOrders = [order, ...orderHistory];
+    final updatedWallet = rewardWallet.copyWith(
+      points:
+          rewardWallet.points - redemption.pointsRedeemed + order.pointsEarned,
+      creditPhp: rewardWallet.creditPhp - redemption.creditUsedPhp,
+    );
+    await _saveShoppingData(
+      ShoppingData(
+        cart: const [],
+        orders: updatedOrders,
+        wallet: updatedWallet,
+      ),
+    );
+    if (mounted) {
+      setState(() {
+        cartItems = [];
+        orderHistory = updatedOrders;
+        rewardWallet = updatedWallet;
+      });
+    }
+    return order;
+  }
+
+  Future<void> _redeemReward() async {
+    if (rewardWallet.points < 200) return;
+    final updatedWallet = rewardWallet.copyWith(
+      points: rewardWallet.points - 200,
+      creditPhp: rewardWallet.creditPhp + 10,
+    );
+    try {
+      await _saveShoppingData(
+        ShoppingData(
+          cart: cartItems,
+          orders: orderHistory,
+          wallet: updatedWallet,
+        ),
+      );
+      if (!mounted) return;
+      setState(() => rewardWallet = updatedWallet);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('₱10 reward credit added.')));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Reward could not be redeemed: $error')),
+      );
+    }
   }
 
   void _openItemCatalog() {
@@ -126,9 +337,9 @@ class _HomePageState extends State<HomePage> {
           onAddProduct: () => _editProduct(),
           onEditProduct: (item) => _editProduct(product: item),
           onDeleteProduct: _deleteProduct,
+          onOpenProduct: _showProductDetails,
           isWishlisted: _isWishlisted,
           onToggleWishlist: _toggleWishlist,
-          onOpenProduct: _showProductDetails,
         ),
       ),
     );
@@ -249,91 +460,64 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  IconData _categoryIcon(String category) {
-    switch (normalizeGiftCategory(category)) {
-      case 'Mugs and Drinkware':
-        return Icons.coffee;
-      case 'Flowers':
-        return Icons.local_florist;
-      case 'Stationery':
-        return Icons.edit_note;
-      case 'Plushies':
-        return Icons.smart_toy_outlined;
-      case 'Fragrance':
-        return Icons.science;
-      default:
-        return Icons.card_giftcard;
-    }
-  }
-
   void _showProductDetails(Datum product) {
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        contentPadding: const EdgeInsets.all(16),
-        content: SizedBox(
-          width: 360,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                height: 190,
-                width: double.infinity,
-                child: productImage(product, _categoryIcon(product.category)),
-              ),
-              const SizedBox(height: 14),
-              Text(
-                product.itemName,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                ),
-              ),
-              Text(
-                product.category,
-                style: const TextStyle(color: Color(0xFF00A884)),
-              ),
-              const SizedBox(height: 8),
-              Text(product.subtitle),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '₱${product.pricePhp}',
-                      style: const TextStyle(
-                        color: Color(0xFFE08CA0),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: _isWishlisted(product)
-                        ? 'Remove from wishlist'
-                        : 'Add to wishlist',
-                    onPressed: () => _toggleWishlist(product),
-                    icon: Icon(
-                      _isWishlisted(product)
-                          ? Icons.favorite
-                          : Icons.favorite_border,
-                      color: const Color(0xFFE08CA0),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (context) => ProductDetailsScreen(
+          product: product,
+          isWishlisted: _isWishlisted,
+          onToggleWishlist: _toggleWishlist,
+          onAddToCart: _addToCart,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
       ),
     );
+  }
+
+  void _openCart() {
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (context) => CartScreen(
+          lines: cartItems,
+          onQuantityChanged: _changeCartQuantity,
+          onBrowseCatalog: _browseCatalogFromCart,
+          onCheckout: _openCheckout,
+        ),
+      ),
+    );
+  }
+
+  void _browseCatalogFromCart() {
+    Navigator.of(context).pop();
+    _openItemCatalog();
+  }
+
+  void _openCheckout() {
+    if (cartItems.isEmpty) return;
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (context) => CheckoutScreen(
+          lines: cartItems,
+          wallet: rewardWallet,
+          initialAddress: profileAddress,
+          onPlaceOrder: _placeOrder,
+          onViewOrders: _returnToOrders,
+          onContinueShopping: _returnToHome,
+        ),
+      ),
+    );
+  }
+
+  void _returnToOrders() {
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    if (mounted) setState(() => screenIndex = 1);
+  }
+
+  void _returnToHome() {
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    if (mounted) setState(() => screenIndex = 0);
   }
 
   Future<void> _editProfile(User user) async {
@@ -341,16 +525,31 @@ class _HomePageState extends State<HomePage> {
       context: context,
       user: user,
       phone: profilePhone,
-      onSave: (name, phone) async {
+      address: profileAddress,
+      onSave: (name, phone, address) async {
         final current = FirebaseAuth.instance.currentUser;
-        if (current == null) return;
+        if (current == null) {
+          throw StateError('Sign in before saving profile changes.');
+        }
         await current.updateDisplayName(name);
-        await userStore.savePhone(current.uid, phone);
         await current.reload();
+        await profileStore.save(
+          current.uid,
+          UserProfileRecord(
+            displayName: name,
+            email: current.email ?? user.email ?? '',
+            phone: phone,
+            address: address,
+          ),
+        );
+        await userStore.savePhone(current.uid, phone);
       },
     );
     if (result != null && mounted) {
-      setState(() => profilePhone = result);
+      setState(() {
+        profilePhone = result.phone;
+        profileAddress = result.address;
+      });
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Profile updated.')));
@@ -421,7 +620,7 @@ class _HomePageState extends State<HomePage> {
   Widget _buildSelectedScreen(User? user) {
     switch (screenIndex) {
       case 1:
-        return const OrdersScreen();
+        return OrdersScreen(orders: orderHistory);
       case 2:
         return SettingsScreen(
           user: user,
@@ -441,23 +640,39 @@ class _HomePageState extends State<HomePage> {
         return ProfileScreen(
           user: user,
           phone: profilePhone,
+          address: profileAddress,
           photoPath: profilePhotoPath,
+          orderCount: orderHistory.length,
+          cartCount: cartItems.fold(0, (total, line) => total + line.quantity),
+          wishlistCount: wishlistIds.length,
+          rewardPoints: rewardWallet.points,
           onEditProfile: user == null ? () {} : () => _editProfile(user),
           onChangePhoto: user == null ? () {} : () => _changeProfilePhoto(user),
+          onOpenOrders: () => _selectScreen(1),
+          onOpenCart: _openCart,
+          onOpenWishlist: () => _selectScreen(3),
+          onOpenRewards: () => _selectScreen(5),
           onSignOut: _signOut,
         );
+      case 5:
+        return RewardsScreen(
+          wallet: rewardWallet,
+          orders: orderHistory,
+          onRedeem: _redeemReward,
+        );
       default:
-        return _buildDashboard(user);
+        return _buildDashboard();
     }
   }
 
-  Widget _buildDashboard(User? user) => HomeDashboard(
-    user: user,
+  Widget _buildDashboard() => HomeDashboard(
     productsFuture: productsFuture,
     searchController: searchController,
     searchQuery: searchQuery,
     selectedCategory: selectedCategory,
     wishlistCount: wishlistIds.length,
+    orderCount: orderHistory.length,
+    rewardPoints: rewardWallet.points,
     onSearchChanged: (value) =>
         setState(() => searchQuery = value.trim().toLowerCase()),
     onSearchSubmitted: (value) =>
@@ -476,23 +691,40 @@ class _HomePageState extends State<HomePage> {
     onCategorySelected: (category) =>
         setState(() => selectedCategory = category),
     onReloadProducts: _reloadProducts,
-    isWishlisted: _isWishlisted,
-    onToggleWishlist: _toggleWishlist,
     onOpenProduct: _showProductDetails,
+    onAddToCart: (product) async {
+      final added = await _addToCart(product, 1);
+      if (added && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${product.itemName} added to cart.')),
+        );
+      }
+      return added;
+    },
+    onOpenOrders: () => _selectScreen(1),
+    onOpenWishlist: () => _selectScreen(3),
+    onOpenRewards: () => _selectScreen(5),
   );
 
   List<Widget> _buildAppBarActions() => [
     IconButton(
-      tooltip: 'Manage product catalog',
+      tooltip: 'Browse item categories',
       onPressed: _openItemCatalog,
-      icon: const Icon(Icons.view_list_outlined),
+      icon: const Icon(Icons.category_outlined),
     ),
   ];
 
   Widget _buildBottomBarScaffold(User? user) => Scaffold(
     key: scaffoldKey,
     appBar: AppBar(
-      title: const Text('Prosfora Gift Shop'),
+      title: const Text(
+        'Prosfora Gift Shop',
+        style: TextStyle(
+          fontSize: 19,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.3,
+        ),
+      ),
       backgroundColor: const Color(0xFFE08CA0),
       foregroundColor: Colors.white,
       actions: _buildAppBarActions(),
@@ -508,105 +740,128 @@ class _HomePageState extends State<HomePage> {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(30),
         child: BottomNavigationBar(
-          currentIndex: screenIndex.clamp(0, destinations.length - 1),
-          onTap: _handleScreenChanged,
+          currentIndex: screenIndex == 4 ? 1 : 0,
+          onTap: _handleFooterChanged,
           backgroundColor: Colors.transparent,
           selectedItemColor: Colors.white,
           unselectedItemColor: Colors.white38,
-          showSelectedLabels: false,
-          showUnselectedLabels: false,
-          items: destinations
-              .map(
-                (destination) => BottomNavigationBarItem(
-                  icon: destination.icon,
-                  activeIcon: destination.selectedIcon,
-                  label: destination.label,
-                ),
-              )
-              .toList(),
+          showSelectedLabels: true,
+          showUnselectedLabels: true,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.store_outlined),
+              activeIcon: Icon(Icons.store),
+              label: 'Dashboard',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.person_outline),
+              activeIcon: Icon(Icons.person),
+              label: 'Profile',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.shopping_cart_outlined),
+              activeIcon: Icon(Icons.shopping_cart),
+              label: 'Cart',
+            ),
+          ],
         ),
       ),
     ),
   );
 
-  Widget _buildNavigationDrawer(User? user) => NavigationDrawer(
-    selectedIndex: screenIndex < destinations.length ? screenIndex : null,
-    onDestinationSelected: (index) {
-      _handleScreenChanged(index);
-      Navigator.pop(context);
-    },
-    children: [
-      UserAccountsDrawerHeader(
-        decoration: const BoxDecoration(color: Color(0xFFE08CA0)),
-        accountName: Text(
-          user?.displayName?.isNotEmpty == true
-              ? user!.displayName!
-              : 'Prosfora Customer',
+  Widget _buildNavigationDrawer(User? user) {
+    final avatarImage = profileImageProvider(profilePhotoPath, user?.photoURL);
+    return NavigationDrawer(
+      selectedIndex: screenIndex < destinations.length ? screenIndex : null,
+      onDestinationSelected: (index) {
+        _handleScreenChanged(index);
+        Navigator.pop(context);
+      },
+      children: [
+        UserAccountsDrawerHeader(
+          decoration: const BoxDecoration(color: Color(0xFFE08CA0)),
+          accountName: Text(
+            user?.displayName?.isNotEmpty == true
+                ? user!.displayName!
+                : 'Prosfora Customer',
+          ),
+          accountEmail: Text(user?.email ?? 'No email'),
+          currentAccountPicture: CircleAvatar(
+            backgroundColor: Colors.white,
+            backgroundImage: avatarImage,
+            child: avatarImage == null
+                ? const Icon(Icons.card_giftcard, color: Color(0xFFE08CA0))
+                : null,
+          ),
         ),
-        accountEmail: Text(user?.email ?? 'No email'),
-        currentAccountPicture: const CircleAvatar(
-          backgroundColor: Colors.white,
-          child: Icon(Icons.card_giftcard, color: Color(0xFFE08CA0)),
+        ...destinations.map(
+          (destination) => NavigationDrawerDestination(
+            label: Text(destination.label),
+            icon: destination.icon,
+            selectedIcon: destination.selectedIcon,
+          ),
         ),
-      ),
-      ...destinations.map(
-        (destination) => NavigationDrawerDestination(
-          label: Text(destination.label),
-          icon: destination.icon,
-          selectedIcon: destination.selectedIcon,
+        const Divider(),
+        ListTile(
+          leading: const Icon(Icons.person_outline),
+          title: const Text('My Profile'),
+          trailing: const Icon(Icons.chevron_right, size: 20),
+          onTap: () {
+            Navigator.pop(context);
+            _selectScreen(4);
+          },
         ),
-      ),
-      const Divider(),
-      ListTile(
-        leading: const Icon(Icons.person_outline),
-        title: const Text('My Profile'),
-        trailing: const Icon(Icons.chevron_right, size: 20),
-        onTap: () {
-          Navigator.pop(context);
-          _selectScreen(4);
-        },
-      ),
-      ListTile(
-        leading: const Icon(Icons.favorite_border),
-        title: const Text('Wishlist'),
-        trailing: const Icon(Icons.chevron_right, size: 20),
-        onTap: () {
-          Navigator.pop(context);
-          _selectScreen(3);
-        },
-      ),
-      ListTile(
-        leading: const Icon(Icons.view_list_outlined),
-        title: const Text('Item Catalog'),
-        trailing: const Icon(Icons.chevron_right, size: 20),
-        onTap: () {
-          Navigator.pop(context);
-          _openItemCatalog();
-        },
-      ),
-      ListTile(
-        leading: const Icon(Icons.notifications_outlined),
-        title: const Text('Notifications'),
-        trailing: const Icon(Icons.chevron_right, size: 20),
-        onTap: () {
-          Navigator.pop(context);
-          _showInfo(
-            'Notifications',
-            'Push notifications are not configured in this app.',
-          );
-        },
-      ),
-      const Divider(),
-      ListTile(
-        leading: const Icon(Icons.logout, color: Colors.red),
-        title: const Text('Sign Out', style: TextStyle(color: Colors.red)),
-        onTap: () async {
-          await _signOut();
-          if (mounted) Navigator.pushReplacementNamed(context, '/login');
-        },
-      ),
-    ],
-  );
+        ListTile(
+          leading: const Icon(Icons.favorite_border),
+          title: const Text('Wishlist'),
+          trailing: const Icon(Icons.chevron_right, size: 20),
+          onTap: () {
+            Navigator.pop(context);
+            _selectScreen(3);
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.stars_outlined),
+          title: const Text('Rewards'),
+          trailing: const Icon(Icons.chevron_right, size: 20),
+          onTap: () {
+            Navigator.pop(context);
+            _selectScreen(5);
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.view_list_outlined),
+          title: const Text('Item Catalog'),
+          trailing: const Icon(Icons.chevron_right, size: 20),
+          onTap: () {
+            Navigator.pop(context);
+            _openItemCatalog();
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.notifications_outlined),
+          title: const Text('Notifications'),
+          trailing: const Icon(Icons.chevron_right, size: 20),
+          onTap: () {
+            Navigator.pop(context);
+            _showInfo(
+              'Notifications',
+              'Push notifications are not configured in this app.',
+            );
+          },
+        ),
+        const Divider(),
+        ListTile(
+          leading: const Icon(Icons.logout, color: Colors.red),
+          title: const Text('Sign Out', style: TextStyle(color: Colors.red)),
+          onTap: () async {
+            await _signOut();
+            if (mounted) Navigator.pushReplacementNamed(context, '/login');
+          },
+        ),
+      ],
+    );
+  }
 
   void _showInfo(String title, String message) {
     showDialog<void>(
@@ -627,7 +882,14 @@ class _HomePageState extends State<HomePage> {
   Widget _buildDrawerScaffold(User? user) => Scaffold(
     key: scaffoldKey,
     appBar: AppBar(
-      title: const Text('Prosfora Gift Shop'),
+      title: const Text(
+        'Prosfora Gift Shop',
+        style: TextStyle(
+          fontSize: 19,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.3,
+        ),
+      ),
       backgroundColor: const Color(0xFFE08CA0),
       foregroundColor: Colors.white,
       actions: _buildAppBarActions(),
@@ -675,51 +937,56 @@ class _HomePageState extends State<HomePage> {
 class HomeDashboard extends StatelessWidget {
   const HomeDashboard({
     super.key,
-    required this.user,
     required this.productsFuture,
     required this.searchController,
     required this.searchQuery,
     required this.selectedCategory,
     required this.wishlistCount,
+    required this.orderCount,
+    required this.rewardPoints,
     required this.onSearchChanged,
     required this.onSearchSubmitted,
     required this.onSearchAction,
     required this.onCategorySelected,
     required this.onReloadProducts,
-    required this.isWishlisted,
-    required this.onToggleWishlist,
     required this.onOpenProduct,
+    required this.onAddToCart,
+    required this.onOpenOrders,
+    required this.onOpenWishlist,
+    required this.onOpenRewards,
   });
 
-  final User? user;
   final Future<Item> productsFuture;
   final TextEditingController searchController;
   final String searchQuery;
   final String selectedCategory;
   final int wishlistCount;
+  final int orderCount;
+  final int rewardPoints;
   final ValueChanged<String> onSearchChanged;
   final ValueChanged<String> onSearchSubmitted;
   final VoidCallback onSearchAction;
   final ValueChanged<String> onCategorySelected;
   final VoidCallback onReloadProducts;
-  final bool Function(Datum) isWishlisted;
-  final Future<void> Function(Datum) onToggleWishlist;
   final ValueChanged<Datum> onOpenProduct;
+  final Future<bool> Function(Datum) onAddToCart;
+  final VoidCallback onOpenOrders;
+  final VoidCallback onOpenWishlist;
+  final VoidCallback onOpenRewards;
 
   static const List<Map<String, Object>> _categories = [
     {'name': 'Flowers', 'icon': Icons.local_florist},
-    {'name': 'Mugs and Drinkware', 'icon': Icons.coffee},
+    {'name': 'Mugs', 'icon': Icons.coffee},
     {'name': 'Stationery', 'icon': Icons.edit_note},
     {'name': 'Plushies', 'icon': Icons.smart_toy_outlined},
     {'name': 'Fragrance', 'icon': Icons.science},
-    {'name': 'Other Gifts', 'icon': Icons.card_giftcard},
   ];
 
   List<String> get _filterChips => ['All', ...giftProductCategories];
 
   IconData _categoryIcon(String category) {
     switch (normalizeGiftCategory(category)) {
-      case 'Mugs and Drinkware':
+      case 'Mugs':
         return Icons.coffee;
       case 'Flowers':
         return Icons.local_florist;
@@ -737,279 +1004,262 @@ class HomeDashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const primaryColor = Color(0xFFE08CA0);
-    const accentTeal = Color(0xFF00A884);
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1000),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 20,
-                    backgroundColor: primaryColor.withAlpha(40),
-                    child: const Icon(
-                      Icons.person,
-                      color: primaryColor,
-                      size: 24,
-                    ),
+    const accentPink = Color(0xFFE08CA0);
+    final isSearching = searchQuery.trim().isNotEmpty;
+    return ColoredBox(
+      color: const Color(0xFFFFF7F9),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1000),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: Colors.grey.shade200),
                   ),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                  child: Row(
                     children: [
-                      const Text(
-                        'Good Morning,',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      const Icon(Icons.search, color: Colors.grey),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: searchController,
+                          textInputAction: TextInputAction.search,
+                          onChanged: onSearchChanged,
+                          onSubmitted: onSearchSubmitted,
+                          decoration: const InputDecoration(
+                            hintText: 'Search for flowers, gifts...',
+                            hintStyle: TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey,
+                            ),
+                            border: InputBorder.none,
+                            isDense: true,
+                          ),
+                        ),
                       ),
-                      Text(
-                        user?.email?.split('@').first ?? 'Guest User',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
+                      IconButton(
+                        tooltip: searchQuery.isEmpty
+                            ? 'Search products'
+                            : 'Clear search',
+                        onPressed: onSearchAction,
+                        icon: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: const BoxDecoration(
+                            color: accentPink,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            searchQuery.isEmpty ? Icons.search : Icons.close,
+                            color: Colors.white,
+                            size: 16,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: Colors.grey.shade200),
                 ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 4,
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.search, color: Colors.grey),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: searchController,
-                        textInputAction: TextInputAction.search,
-                        onChanged: onSearchChanged,
-                        onSubmitted: onSearchSubmitted,
-                        decoration: const InputDecoration(
-                          hintText: 'Search for flowers, gifts...',
-                          hintStyle: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey,
-                          ),
-                          border: InputBorder.none,
-                          isDense: true,
-                        ),
-                      ),
+                if (isSearching) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Search results',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
                     ),
-                    IconButton(
-                      tooltip: searchQuery.isEmpty
-                          ? 'Search products'
-                          : 'Clear search',
-                      onPressed: onSearchAction,
-                      icon: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: const BoxDecoration(
-                          color: accentTeal,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          searchQuery.isEmpty ? Icons.search : Icons.close,
-                          color: Colors.white,
-                          size: 16,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF2C2C2C), Color(0xFF1A1A1A)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
                   ),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                  const SizedBox(height: 8),
+                ],
+                if (!isSearching) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    height: 176,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withAlpha(25),
+                          blurRadius: 12,
+                          offset: const Offset(0, 5),
+                        ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Stack(
+                        fit: StackFit.expand,
                         children: [
-                          const Text(
-                            'Today Special!',
-                            style: TextStyle(
-                              color: Colors.orange,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
+                          Image.asset(
+                            'assets/Product/Flowers/1flower_Rose_box.jpg',
+                            fit: BoxFit.cover,
+                            alignment: Alignment.centerRight,
                           ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Get 15% OFF',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                          const Text(
-                            'Romantic Flowers',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          TextButton.icon(
-                            onPressed: () => onCategorySelected('Flowers'),
-                            style: TextButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
+                          const DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [Color(0xE6000000), Color(0x00000000)],
+                                begin: Alignment.centerLeft,
+                                end: Alignment.centerRight,
+                                stops: [0, 1],
                               ),
                             ),
-                            icon: const Icon(Icons.local_florist, size: 16),
-                            label: const Text(
-                              'Browse flowers',
-                              style: TextStyle(fontSize: 12),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: SizedBox(
+                              width: 230,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Today Special!',
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  const Text(
+                                    'Get 15% OFF',
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  const Text(
+                                    'Romantic Flowers',
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  FilledButton(
+                                    onPressed: () =>
+                                        onCategorySelected('Flowers'),
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: accentPink,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 7,
+                                      ),
+                                    ),
+                                    child: const Text('Browse flowers'),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const CircleAvatar(
-                      radius: 36,
-                      backgroundColor: Colors.white12,
-                      child: Icon(
-                        Icons.local_florist,
-                        size: 40,
-                        color: primaryColor,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                height: 75,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _categories.length,
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(width: 16),
-                  itemBuilder: (context, index) {
-                    final item = _categories[index];
-                    final categoryName = item['name']! as String;
-                    final isSelected =
-                        normalizeGiftCategory(selectedCategory) ==
-                        normalizeGiftCategory(categoryName);
-                    return InkWell(
-                      onTap: () => onCategorySelected(categoryName),
-                      borderRadius: BorderRadius.circular(28),
-                      child: Column(
-                        children: [
-                          CircleAvatar(
-                            radius: 24,
-                            backgroundColor: isSelected
-                                ? primaryColor.withAlpha(40)
-                                : Colors.grey.shade100,
-                            child: Icon(
-                              item['icon']! as IconData,
-                              color: primaryColor,
-                              size: 20,
-                            ),
+                  ),
+                  const SizedBox(height: 20),
+                  LayoutBuilder(
+                    builder: (context, constraints) => SizedBox(
+                      height: 75,
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minWidth: constraints.maxWidth,
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            categoryName,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: isSelected
-                                  ? FontWeight.bold
-                                  : FontWeight.w500,
-                            ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              for (final item in _categories)
+                                _categoryItem(
+                                  item,
+                                  onCategorySelected,
+                                  selectedCategory,
+                                  primaryColor,
+                                ),
+                            ],
                           ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: _statCard(
-                      'Orders',
-                      'No orders',
-                      Icons.receipt_long_outlined,
-                      Colors.orange,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _statCard(
-                      'Wishlist',
-                      '$wishlistCount Items',
-                      Icons.favorite_border,
-                      Colors.pink,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _statCard(
-                      'Rewards',
-                      'Not available',
-                      Icons.stars_outlined,
-                      Colors.purple,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                height: 32,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _filterChips.length,
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(width: 8),
-                  itemBuilder: (context, index) {
-                    final chip = _filterChips[index];
-                    final isSelected = selectedCategory == chip;
-                    return ChoiceChip(
-                      label: Text(
-                        chip,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isSelected ? Colors.white : Colors.black87,
                         ),
                       ),
-                      selected: isSelected,
-                      selectedColor: accentTeal,
-                      backgroundColor: Colors.grey.shade100,
-                      showCheckmark: false,
-                      onSelected: (_) => onCategorySelected(chip),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 16),
-              _apiContent(context),
-            ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _statCard(
+                          'Orders',
+                          '$orderCount Orders',
+                          Icons.receipt_long_outlined,
+                          Colors.orange,
+                          onTap: onOpenOrders,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _statCard(
+                          'Wishlist',
+                          '$wishlistCount Items',
+                          Icons.favorite_border,
+                          Colors.pink,
+                          onTap: onOpenWishlist,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _statCard(
+                          'Rewards',
+                          '$rewardPoints Points',
+                          Icons.stars_outlined,
+                          Colors.purple,
+                          onTap: onOpenRewards,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    height: 32,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _filterChips.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(width: 8),
+                      itemBuilder: (context, index) {
+                        final chip = _filterChips[index];
+                        final isSelected = selectedCategory == chip;
+                        return ChoiceChip(
+                          label: Text(
+                            chip,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isSelected ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                          selected: isSelected,
+                          selectedColor: accentPink,
+                          backgroundColor: Colors.grey.shade100,
+                          showCheckmark: false,
+                          onSelected: (_) => onCategorySelected(chip),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                _apiContent(context),
+              ],
+            ),
           ),
         ),
       ),
@@ -1066,14 +1316,16 @@ class HomeDashboard extends StatelessWidget {
           ),
         );
       }
+      final query = searchQuery.trim().toLowerCase();
       final filteredProducts = products.where((item) {
         final matchesCategory =
+            query.isNotEmpty ||
             selectedCategory == 'All' ||
             normalizeGiftCategory(item.category) ==
                 normalizeGiftCategory(selectedCategory);
-        final matchesSearch =
-            searchQuery.isEmpty ||
-            item.itemName.toLowerCase().contains(searchQuery);
+        final searchableText =
+            '${item.itemName} ${item.category} ${item.subtitle}'.toLowerCase();
+        final matchesSearch = query.isEmpty || searchableText.contains(query);
         return matchesCategory && matchesSearch;
       }).toList();
       if (filteredProducts.isEmpty) {
@@ -1081,8 +1333,8 @@ class HomeDashboard extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Text(
-              searchQuery.isNotEmpty
-                  ? 'No products found for "$searchQuery".'
+              query.isNotEmpty
+                  ? 'No products found for "$query".'
                   : 'No products found for "$selectedCategory".',
             ),
           ),
@@ -1107,42 +1359,91 @@ class HomeDashboard extends StatelessWidget {
     },
   );
 
-  Widget _statCard(String title, String value, IconData icon, Color color) =>
-      Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.shade200),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, color: color, size: 20),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    value,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    title,
-                    style: TextStyle(color: Colors.grey[600], fontSize: 10),
-                  ),
-                ],
-              ),
+  Widget _categoryItem(
+    Map<String, Object> item,
+    ValueChanged<String> onCategorySelected,
+    String selectedCategory,
+    Color primaryColor,
+  ) {
+    final categoryName = item['name']! as String;
+    final isSelected =
+        normalizeGiftCategory(selectedCategory) ==
+        normalizeGiftCategory(categoryName);
+    return InkWell(
+      onTap: () => onCategorySelected(categoryName),
+      borderRadius: BorderRadius.circular(28),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircleAvatar(
+            radius: 24,
+            backgroundColor: isSelected
+                ? primaryColor.withAlpha(40)
+                : Colors.grey.shade100,
+            child: Icon(
+              item['icon']! as IconData,
+              color: primaryColor,
+              size: 20,
             ),
-          ],
-        ),
-      );
+          ),
+          const SizedBox(height: 4),
+          Text(
+            categoryName,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statCard(
+    String title,
+    String value,
+    IconData icon,
+    Color color, {
+    VoidCallback? onTap,
+  }) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(12),
+    child: Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  title,
+                  style: TextStyle(color: Colors.grey[600], fontSize: 10),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 
   Widget _productCard(Datum item, IconData icon) {
-    const accentTeal = Color(0xFF00A884);
+    const accentPink = Color(0xFFE08CA0);
     return Card(
       color: Colors.white,
       elevation: 1,
@@ -1178,16 +1479,10 @@ class HomeDashboard extends StatelessWidget {
               Text(
                 item.category,
                 style: const TextStyle(
-                  color: accentTeal,
+                  color: accentPink,
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              Text(
-                item.subtitle,
-                style: const TextStyle(color: Colors.grey, fontSize: 10),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1203,15 +1498,11 @@ class HomeDashboard extends StatelessWidget {
                     ),
                   ),
                   IconButton(
-                    tooltip: isWishlisted(item)
-                        ? 'Remove from Wishlist'
-                        : 'Add to Wishlist',
-                    onPressed: () => onToggleWishlist(item),
-                    icon: Icon(
-                      isWishlisted(item)
-                          ? Icons.favorite
-                          : Icons.favorite_border,
-                      color: const Color(0xFFE08CA0),
+                    tooltip: 'Add to cart',
+                    onPressed: () => onAddToCart(item),
+                    icon: const Icon(
+                      Icons.add_shopping_cart_outlined,
+                      color: Color(0xFFE08CA0),
                     ),
                     visualDensity: VisualDensity.compact,
                   ),

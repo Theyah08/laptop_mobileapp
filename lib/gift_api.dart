@@ -23,7 +23,7 @@ String _newProductId() =>
 
 const List<String> giftProductCategories = [
   'Flowers',
-  'Mugs and Drinkware',
+  'Mugs',
   'Stationery',
   'Plushies',
   'Fragrance',
@@ -36,7 +36,7 @@ String normalizeGiftCategory(String value) {
   );
   if (normalized.contains('flower')) return 'Flowers';
   if (normalized.contains('mug') || normalized.contains('drinkware')) {
-    return 'Mugs and Drinkware';
+    return 'Mugs';
   }
   if (normalized.contains('station')) return 'Stationery';
   if (normalized.contains('teddy') || normalized.contains('plush')) {
@@ -381,6 +381,197 @@ class Datum {
   };
 }
 
+class CartLine {
+  const CartLine({required this.product, required this.quantity});
+
+  final Datum product;
+  final int quantity;
+
+  int get totalPhp => product.pricePhp * quantity;
+
+  CartLine copyWith({Datum? product, int? quantity}) => CartLine(
+    product: product ?? this.product,
+    quantity: quantity ?? this.quantity,
+  );
+
+  factory CartLine.fromJson(Map<String, dynamic> json) {
+    final product = json['product'];
+    if (product is! Map<String, dynamic>) {
+      throw const FormatException('Cart line must contain a product.');
+    }
+    final quantity = json['quantity'];
+    if (quantity is! int || quantity < 1) {
+      throw const FormatException('Cart quantity must be greater than zero.');
+    }
+    return CartLine(product: Datum.fromJson(product), quantity: quantity);
+  }
+
+  Map<String, dynamic> toJson() => {
+    'product': product.toJson(),
+    'quantity': quantity,
+  };
+}
+
+class ShopOrder {
+  const ShopOrder({
+    required this.id,
+    required this.orderedAt,
+    required this.shippingAddress,
+    required this.lines,
+    required this.pointsEarned,
+    required this.voucherDiscountPhp,
+    this.status = 'Processing',
+  });
+
+  final String id;
+  final DateTime orderedAt;
+  final String shippingAddress;
+  final List<CartLine> lines;
+  final int pointsEarned;
+  final int voucherDiscountPhp;
+  final String status;
+
+  int get subtotalPhp => lines.fold(0, (total, line) => total + line.totalPhp);
+  int get totalPhp =>
+      (subtotalPhp - voucherDiscountPhp).clamp(0, subtotalPhp).toInt();
+
+  factory ShopOrder.fromJson(Map<String, dynamic> json) {
+    final lines = json['lines'];
+    if (lines is! List) {
+      throw const FormatException('Order must contain item lines.');
+    }
+    return ShopOrder(
+      id: json['id']?.toString() ?? '',
+      orderedAt: DateTime.parse(json['orderedAt'] as String),
+      shippingAddress: json['shippingAddress'] as String? ?? '',
+      lines: lines
+          .map(
+            (line) => CartLine.fromJson(Map<String, dynamic>.from(line as Map)),
+          )
+          .toList(),
+      pointsEarned: json['pointsEarned'] as int? ?? 0,
+      voucherDiscountPhp: json['voucherDiscountPhp'] as int? ?? 0,
+      status: json['status'] as String? ?? 'Processing',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'orderedAt': orderedAt.toIso8601String(),
+    'shippingAddress': shippingAddress,
+    'lines': lines.map((line) => line.toJson()).toList(),
+    'pointsEarned': pointsEarned,
+    'voucherDiscountPhp': voucherDiscountPhp,
+    'status': status,
+  };
+}
+
+class RewardWallet {
+  const RewardWallet({this.points = 0, this.creditPhp = 0});
+
+  final int points;
+  final int creditPhp;
+
+  RewardWallet copyWith({int? points, int? creditPhp}) => RewardWallet(
+    points: points ?? this.points,
+    creditPhp: creditPhp ?? this.creditPhp,
+  );
+
+  factory RewardWallet.fromJson(Map<String, dynamic> json) => RewardWallet(
+    points: json['points'] as int? ?? 0,
+    creditPhp: json['creditPhp'] as int? ?? 0,
+  );
+
+  Map<String, dynamic> toJson() => {'points': points, 'creditPhp': creditPhp};
+}
+
+class RewardRedemption {
+  const RewardRedemption({
+    required this.pointsRedeemed,
+    required this.creditUsedPhp,
+    required this.discountPhp,
+  });
+
+  final int pointsRedeemed;
+  final int creditUsedPhp;
+  final int discountPhp;
+}
+
+int rewardPointsForPurchase(int subtotalPhp) =>
+    subtotalPhp > 0 ? subtotalPhp ~/ 100 : 0;
+
+RewardRedemption calculateRewardRedemption({
+  required RewardWallet wallet,
+  required int subtotalPhp,
+  required bool applyRewards,
+}) {
+  if (!applyRewards || subtotalPhp <= 0) {
+    return const RewardRedemption(
+      pointsRedeemed: 0,
+      creditUsedPhp: 0,
+      discountPhp: 0,
+    );
+  }
+
+  final pointGroupsAvailable = wallet.points > 0 ? wallet.points ~/ 200 : 0;
+  final pointGroupsAffordable = subtotalPhp ~/ 10;
+  final pointGroups = pointGroupsAvailable < pointGroupsAffordable
+      ? pointGroupsAvailable
+      : pointGroupsAffordable;
+  final pointsRedeemed = pointGroups * 200;
+  final pointsDiscountPhp = pointGroups * 10;
+  final creditUsedPhp = wallet.creditPhp
+      .clamp(0, subtotalPhp - pointsDiscountPhp)
+      .toInt();
+
+  return RewardRedemption(
+    pointsRedeemed: pointsRedeemed,
+    creditUsedPhp: creditUsedPhp,
+    discountPhp: pointsDiscountPhp + creditUsedPhp,
+  );
+}
+
+class ShoppingData {
+  const ShoppingData({
+    this.cart = const [],
+    this.orders = const [],
+    this.wallet = const RewardWallet(),
+  });
+
+  final List<CartLine> cart;
+  final List<ShopOrder> orders;
+  final RewardWallet wallet;
+
+  Map<String, dynamic> toJson() => {
+    'cart': cart.map((line) => line.toJson()).toList(),
+    'orders': orders.map((order) => order.toJson()).toList(),
+    'wallet': wallet.toJson(),
+  };
+
+  factory ShoppingData.fromJson(Map<String, dynamic> json) {
+    final cart = json['cart'];
+    final orders = json['orders'];
+    final wallet = json['wallet'];
+    if (cart is! List || orders is! List || wallet is! Map) {
+      throw const FormatException('Saved shopping data is invalid.');
+    }
+    return ShoppingData(
+      cart: cart
+          .map(
+            (line) => CartLine.fromJson(Map<String, dynamic>.from(line as Map)),
+          )
+          .toList(),
+      orders: orders
+          .map(
+            (order) =>
+                ShopOrder.fromJson(Map<String, dynamic>.from(order as Map)),
+          )
+          .toList(),
+      wallet: RewardWallet.fromJson(Map<String, dynamic>.from(wallet)),
+    );
+  }
+}
+
 class UserLocalStore {
   Future<SharedPreferences> get _preferences => SharedPreferences.getInstance();
 
@@ -393,6 +584,23 @@ class UserLocalStore {
     await (await _preferences).setStringList(
       _key(uid, 'wishlist'),
       productIds.toList(),
+    );
+  }
+
+  Future<ShoppingData> loadShoppingData(String uid) async {
+    final saved = (await _preferences).getString(_key(uid, 'shopping'));
+    if (saved == null) return const ShoppingData();
+    final decoded = jsonDecode(saved);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Saved shopping data must be an object.');
+    }
+    return ShoppingData.fromJson(decoded);
+  }
+
+  Future<void> saveShoppingData(String uid, ShoppingData data) async {
+    await (await _preferences).setString(
+      _key(uid, 'shopping'),
+      jsonEncode(data.toJson()),
     );
   }
 
@@ -446,6 +654,58 @@ class UserLocalStore {
 
   Future<void> resetLocalCatalog() async {
     await (await _preferences).remove(_catalogStorageKey);
+  }
+}
+
+class UserProfileRecord {
+  const UserProfileRecord({
+    required this.displayName,
+    required this.email,
+    required this.phone,
+    required this.address,
+  });
+
+  final String displayName;
+  final String email;
+  final String phone;
+  final String address;
+
+  factory UserProfileRecord.fromMap(Map<String, dynamic> map) =>
+      UserProfileRecord(
+        displayName: map['displayName'] as String? ?? '',
+        email: map['email'] as String? ?? '',
+        phone: map['phone'] as String? ?? '',
+        address: map['address'] as String? ?? '',
+      );
+
+  Map<String, String> toMap() => {
+    'displayName': displayName,
+    'email': email,
+    'phone': phone,
+    'address': address,
+  };
+}
+
+class FirestoreUserProfileStore {
+  FirestoreUserProfileStore({FirebaseFirestore? firestore})
+    : _firestore = firestore ?? FirebaseFirestore.instance;
+
+  final FirebaseFirestore _firestore;
+
+  DocumentReference<Map<String, dynamic>> _profileDocument(String uid) =>
+      _firestore.collection('profiles').doc(uid);
+
+  Future<UserProfileRecord?> load(String uid) async {
+    final snapshot = await _profileDocument(uid).get();
+    final data = snapshot.data();
+    return data == null ? null : UserProfileRecord.fromMap(data);
+  }
+
+  Future<void> save(String uid, UserProfileRecord profile) async {
+    await _profileDocument(uid).set({
+      ...profile.toMap(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 }
 

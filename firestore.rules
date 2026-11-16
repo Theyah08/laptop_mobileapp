@@ -43,5 +43,37 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['seeded'])
         && request.resource.data.seeded is bool;
     }
+
+    match /profiles/{userId} {
+      function ownsProfile() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+
+      function validProfile() {
+        return request.resource.data.keys().hasAll([
+            'displayName',
+            'email',
+            'phone',
+            'address',
+            'updatedAt'
+          ])
+          && request.resource.data.keys().hasOnly([
+            'displayName',
+            'email',
+            'phone',
+            'address',
+            'updatedAt'
+          ])
+          && request.resource.data.displayName is string
+          && request.resource.data.email is string
+          && request.resource.data.phone is string
+          && request.resource.data.address is string
+          && request.resource.data.updatedAt is timestamp;
+      }
+
+      allow read: if ownsProfile();
+      allow create, update: if ownsProfile() && validProfile();
+      allow delete: if false;
+    }
   }
 }
